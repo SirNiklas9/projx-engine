@@ -88,6 +88,14 @@ func runBrokeredExec(bin string, args []string) {
 	// Inject sealed secrets into the child's environment by codename.
 	// The child (the real tool) receives codename=plaintext. The agent's own
 	// process never held these values — it only carried the codename list.
+	//
+	// Under OS-FS confinement the keyfile is outside the confined root, so
+	// secrets.Open() will fail here — that is expected. The launcher already
+	// decrypted and injected secrets into the confined process's environment
+	// before confinement was applied; child tools inherit them via normal env
+	// propagation without needing the shim to re-inject. This path is therefore
+	// always non-fatal: a failure means either no store exists or we are running
+	// inside a confined agent where the launcher has already handled injection.
 	if sec, secErr := secrets.Open(); secErr == nil {
 		if vals, resolveErr := sec.Resolve(); resolveErr == nil {
 			for codename, val := range vals {
@@ -96,10 +104,10 @@ func runBrokeredExec(bin string, args []string) {
 		} else {
 			fmt.Fprintf(os.Stderr, "projx-engine: warning: secrets resolve: %v\n", resolveErr)
 		}
-	} else if os.Getenv("PROJX_SECRETS_DIR") != "" {
-		// Only warn when the caller explicitly pointed at a secrets dir.
-		fmt.Fprintf(os.Stderr, "projx-engine: warning: secrets open: %v\n", secErr)
 	}
+	// secErr intentionally ignored: under OS-FS confinement the keyfile is
+	// inaccessible and Open will fail — values already flow via env inheritance
+	// from the launcher. We never hard-fail on Open error here.
 
 	if runErr := cmd.Run(); runErr != nil {
 		os.Exit(exitCode(runErr))

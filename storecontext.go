@@ -11,6 +11,20 @@ package main
 // VENDOR-NEUTRAL: works with Claude Code, opencode, aider, or any agent CLI.
 // The knowledge is present by construction at launch; the agent never needs to be
 // taught it at runtime.
+//
+// TIERED AMBIENT CONTEXT (token thesis):
+//
+// Not all store records need to be delivered verbatim at launch. Gate rules and
+// conventions are load-bearing law the agent must always have verbatim (full).
+// ADRs, declared structure, docs, and history are reference material the agent
+// can pull on demand — those sections are indexed (id + one-line summary only).
+//
+// Index entries tell the agent to run `projx-engine store get <id>` to load a
+// full record's content when needed.
+//
+// TODO (future): session-delta delivery — track which records the agent already
+// saw in a prior turn and only send changes. That requires a per-session
+// checkpoint file. Deferred; tiered/index retrieval is this pillar's scope.
 
 import (
 	"fmt"
@@ -18,6 +32,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	store "github.com/SirNiklas9/projx-store"
 )
@@ -25,6 +40,11 @@ import (
 // agentContextFileName is the on-disk preamble written for every launched agent.
 // Lives under .projx so it travels with the project and is trivially git-ignorable.
 const agentContextFileName = "agent-context.md"
+
+// fullBodyCap is the maximum body length (bytes) for a record in a FULL section.
+// Records exceeding this are demoted to index lines even in full sections, so one
+// unusually large record cannot blow up the launch context.
+const fullBodyCap = 1500
 
 // storeProtocolText is the fixed, vendor-neutral contract the agent is handed at
 // launch: how the store works and the rules it is bound to. Copied faithfully from
@@ -42,7 +62,10 @@ before it can land):
 2. KNOWLEDGE IN = THE STORE. When you need to know something about this project,
    it is in the store (below, or via the store.query tool). Do not rely on or
    author loose .md files for project knowledge — they are not authoritative and
-   not read.
+   not read. Some items below are shown as an INDEX (id + one-line summary) to
+   save context tokens — to load any item's full content on demand run
+   ` + "`projx-engine store get <id>`" + ` (or search with ` + "`store query`" + `);
+   do not assume the summary is the whole thing.
 3. KNOWLEDGE OUT = store.commit. When you learn, decide, or mark something down
    (a convention, an ADR, a doc, a history entry), commit it to the store via
    the store.commit tool. One commit after another — that IS the project's
@@ -54,25 +77,36 @@ before it can land):
    diff through projx-verify and the gate; only a clean diff is accepted. Write
    code that conforms to the store and it lands; violate it and it bounces back.`
 
-// preambleSection pairs a Kind with its display header, in the order the preamble
-// emits. Gate rules come first: off-limits is the most load-bearing knowledge.
+// preambleSection pairs a Kind with its display header and delivery tier.
+// full=true: records are delivered verbatim (with a per-record size cap).
+// full=false: section is indexed — one line per record, full body on demand.
+//
+// Gate rules and conventions are load-bearing law/behavior the agent must always
+// have verbatim. ADRs, declared structure, docs, and history are reference the
+// agent can pull on demand.
 type preambleSection struct {
 	kind   store.Kind
 	header string
+	full   bool
 }
 
 var preambleSections = []preambleSection{
-	{store.KGateRule, "OFF-LIMITS — do NOT read, edit, or run against these (this is LAW, enforced)"},
-	{store.KConvention, "Conventions you MUST follow"},
-	{store.KADR, "Architecture decisions (ADRs)"},
-	{store.KDeclaredStructure, "Declared structure / boundary rules"},
-	{store.KDoc, "Subsystem notes"},
-	{store.KHistory, "Recent history (most recent decisions/changes)"},
+	{store.KGateRule, "OFF-LIMITS — do NOT read, edit, or run against these (this is LAW, enforced)", true},
+	{store.KConvention, "Conventions you MUST follow", true},
+	{store.KADR, "Architecture decisions (ADRs)", false},
+	{store.KDeclaredStructure, "Declared structure / boundary rules", false},
+	{store.KDoc, "Subsystem notes", false},
+	{store.KHistory, "Recent history (most recent decisions/changes)", false},
 }
 
 // compileStorePreamble renders the project store into the ambient agent preamble:
 // the protocol the agent MUST follow (read-before-act, commit-on-learn, gate is
 // law) followed by the live store contents grouped by kind.
+//
+// Full sections (gate rules, conventions) deliver verbatim body up to fullBodyCap
+// bytes; oversized records are demoted to index lines. Index sections (ADRs,
+// declared structure, docs, history) deliver one line per record with a note to
+// fetch full content on demand — this is the token-reduction pillar.
 //
 // Deterministic and read-only (List only); never mutates the store. An empty
 // store still yields the protocol section, so the agent always knows the rules
@@ -104,8 +138,15 @@ func compileStorePreamble(st store.Store) string {
 		})
 		wroteAny = true
 		fmt.Fprintf(&b, "\n## %s\n", sec.header)
+		if !sec.full {
+			b.WriteString("_(indexed — run `projx-engine store get <id>` to load the full content of any item below when you need it)_\n")
+		}
 		for _, r := range recs {
-			renderPreambleRecord(&b, sec.kind, r)
+			if sec.full && len(r.Body) <= fullBodyCap {
+				renderPreambleRecord(&b, sec.kind, r)
+			} else {
+				renderIndexRecord(&b, sec.kind, r)
+			}
 		}
 	}
 	if !wroteAny {
@@ -114,10 +155,9 @@ func compileStorePreamble(st store.Store) string {
 	return b.String()
 }
 
-// renderPreambleRecord renders one record into the preamble. Gate rules render as
-// bare path patterns (that's their Body); everything else renders Key + Body.
-// Full Body is included (not one-lined) — the agent should have the real content
-// ambient, not a teaser; the store is the source of truth, so no truncation.
+// renderPreambleRecord renders one record into the preamble at full fidelity.
+// Gate rules render as bare path patterns (that's their Body); everything else
+// renders Key + Body.
 func renderPreambleRecord(b *strings.Builder, kind store.Kind, r store.Record) {
 	key := strings.TrimSpace(r.Key)
 	body := strings.TrimSpace(r.Body)
@@ -134,6 +174,56 @@ func renderPreambleRecord(b *strings.Builder, kind store.Kind, r store.Record) {
 		}
 		b.WriteString(body + "\n")
 	}
+}
+
+// renderIndexRecord renders one record as a single index line:
+//
+//	- [`<id>`] <key> — <one-line summary>
+//
+// For full-section records that exceeded fullBodyCap, a note is appended.
+// Gate rules are never index-rendered (they are always short by design).
+func renderIndexRecord(b *strings.Builder, kind store.Kind, r store.Record) {
+	key := strings.TrimSpace(r.Key)
+	summary := oneLineSummary(strings.TrimSpace(r.Body))
+	if kind == store.KGateRule {
+		// Gate rules are always short — fall back to full render for safety.
+		renderPreambleRecord(b, kind, r)
+		return
+	}
+	line := fmt.Sprintf("- [`%s`] %s — %s", r.ID, key, summary)
+	if len(r.Body) > fullBodyCap {
+		line += fmt.Sprintf("  _(body >%d bytes — run `projx-engine store get %s` for full content)_", fullBodyCap, r.ID)
+	}
+	b.WriteString(line + "\n")
+}
+
+// oneLineSummary returns the first non-empty trimmed line of body, with internal
+// whitespace collapsed to single spaces, truncated to 120 runes with a trailing
+// ellipsis if longer. An empty body returns "(no summary)".
+func oneLineSummary(body string) string {
+	if body == "" {
+		return "(no summary)"
+	}
+	// Find first non-empty line.
+	line := ""
+	for _, l := range strings.Split(body, "\n") {
+		l = strings.TrimSpace(l)
+		if l != "" {
+			line = l
+			break
+		}
+	}
+	if line == "" {
+		return "(no summary)"
+	}
+	// Collapse internal whitespace.
+	line = strings.Join(strings.Fields(line), " ")
+	// Truncate to 120 runes.
+	if utf8.RuneCountInString(line) > 120 {
+		runes := []rune(line)
+		line = string(runes[:120]) + "…"
+	}
+	return line
 }
 
 // nonSettingsRecords drops setting/* records (e.g. the OpenRouter key/model) —

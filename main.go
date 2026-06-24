@@ -85,7 +85,7 @@ func main() {
 	case "agent":
 		runAgentCmd(absRoot, rest)
 	case "run":
-		runRunCmd(rest)
+		runRunCmd(absRoot, rest)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command %q\n\n", cmd)
 		usage()
@@ -119,7 +119,7 @@ func runConfinedLaunchCmd(args []string) {
 }
 
 func usage() {
-	fmt.Print(`projx-engine — headless engine CLI (milestone 1: extraction skeleton)
+	fmt.Print(`projx-engine — headless engine CLI
 
 Usage:
   projx-engine [--root <dir>] <command> [args]
@@ -138,12 +138,14 @@ Real commands:
   gate list                               list gate rules
   gate rm <id-or-pattern>                 remove a gate rule
   verify                                  check declared vs actual boundaries
+  run [--dry-run] <task>                  triage task → deterministic op or agent
+                                            --dry-run: print decision, no execution
+                                            policy: .projx/routing.json (optional)
 
 Stubbed (not yet):
   secret set <CODENAME>
   secret ls
   agent run [prompt]
-  run <task>
 `)
 }
 

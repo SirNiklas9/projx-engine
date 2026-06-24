@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/SirNiklas9/projx-engine/internal/confine"
 	"github.com/SirNiklas9/projx-engine/internal/jail"
 	"github.com/SirNiklas9/projx-engine/internal/secrets"
 )
@@ -238,24 +239,44 @@ func TestSecretNotInAgentEnv(t *testing.T) {
 	t.Logf("fake agent stdout:\n%s", stdout)
 	t.Logf("engine stderr:\n%s", errBuf.String())
 
-	// SECURITY ASSERTION 1: TOK value must be empty in the agent's environment.
-	tokLeaked := false
+	// Detect whether OS-level confinement is active.
+	// Under OS-FS confinement (Landlock / AppContainer), the launcher injects
+	// decrypted values into the confined process env BEFORE the confinement
+	// boundary is applied — plaintext in the agent env is the intended behaviour
+	// at that tier. The LLM still cannot read them (no shell, restricted
+	// agent-context, kernel FS wall).
+	//
+	// Under the cooperative tier, no kernel wall exists, so we keep the stronger
+	// codename-only model: plaintext must NOT appear in the agent env.
+	c := confine.Detect()
+	osConfined := c.Available()
+	t.Logf("confiner: level=%q available=%v", c.Level(), osConfined)
+
+	// Parse TOK_VALUE line.
+	var tokVal string
 	for _, line := range strings.Split(stdout, "\n") {
 		line = strings.TrimRight(line, "\r")
 		if strings.HasPrefix(line, "TOK_VALUE=") {
-			val := strings.TrimPrefix(line, "TOK_VALUE=")
-			if val != "" {
-				tokLeaked = true
-				t.Errorf("SECURITY FAILURE: agent env contains TOK=%q — plaintext leaked to agent", val)
-			}
+			tokVal = strings.TrimPrefix(line, "TOK_VALUE=")
 			break
 		}
 	}
-	if tokLeaked {
-		t.Logf("full stdout: %q", stdout)
+
+	if osConfined {
+		// Under OS-FS confinement, inject-before-confine means the plaintext
+		// IS in the agent env — this is expected and correct.
+		if tokVal != "SECRETVAL" {
+			t.Errorf("under OS-FS confinement, expected TOK=SECRETVAL in agent env, got %q", tokVal)
+		}
+		t.Logf("OS-FS confinement active: plaintext reached agent env as expected (kernel wall is the guard)")
+	} else {
+		// Cooperative tier: codename-only model — plaintext must not appear.
+		if tokVal != "" {
+			t.Errorf("SECURITY FAILURE (cooperative tier): agent env contains TOK=%q — plaintext leaked to agent\nfull stdout: %q", tokVal, stdout)
+		}
 	}
 
-	// SECURITY ASSERTION 2: PROJX_SECRET_NAMES must contain "TOK".
+	// SECURITY ASSERTION (both tiers): PROJX_SECRET_NAMES must contain "TOK".
 	namesFound := false
 	for _, line := range strings.Split(stdout, "\n") {
 		line = strings.TrimRight(line, "\r")

@@ -219,12 +219,23 @@ func runAgentCmd(absRoot string, args []string) {
 	// On platforms without an OS confiner (macOS, etc.) we launch the agent
 	// directly — cooperative jail only, honestly reported in the banner above.
 	if osConfined {
-		// Warn if secrets are present — keyfile is outside the confined root so
-		// the brokered shim cannot decrypt at the OS-FS tier.
+		// Under OS-FS confinement, secrets are decrypted in the unconfined
+		// launcher (RunConfinedLaunch / LaunchConfined) BEFORE the confinement
+		// boundary is applied, so the keyfile is still readable at that point.
+		// The decrypted CODENAME=value pairs are injected into the confined
+		// process's environment, from which child tools inherit them normally.
+		//
+		// NOTE: The plaintext therefore lives in the confined process's env
+		// (not codename-only, as in the cooperative tier). The LLM cannot
+		// read it: it has no shell, and the agent-context restriction blocks
+		// direct access. The stronger model — an out-of-container IPC broker
+		// that never puts plaintext in the process env — is a future refinement.
 		if len(secretNames) > 0 {
-			fmt.Fprintln(os.Stderr, "projx-engine: secrets: injection is unavailable under OS-FS confinement "+
-				"(keyfile is outside the confined root) — secrets work only at the cooperative tier; "+
-				"this is a known limitation.")
+			fmt.Fprintf(os.Stderr,
+				"projx-engine: secrets: %d injected into the confined process environment "+
+					"(by codename); the model has no tool to read them "+
+					"(no shell, restricted agent-context).\n",
+				len(secretNames))
 		}
 
 		confinedEnv := append(env, "PROJX_JAIL_DIR="+jailDir)

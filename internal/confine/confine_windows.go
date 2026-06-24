@@ -11,6 +11,7 @@ import (
 	"strings"
 	"unsafe"
 
+	"github.com/SirNiklas9/projx-engine/internal/secrets"
 	"golang.org/x/sys/windows"
 )
 
@@ -68,6 +69,18 @@ func (appcontainerConfiner) Apply(p Policy) error { return nil }
 // Windows system paths (C:\Windows, Program Files) are SKIPPED for explicit
 // grants — they already permit ALL_APPLICATION_PACKAGES by default.
 //
+// Secret injection strategy (OS-FS tier):
+//
+// LaunchConfined runs in the UNCONFINED engine process before CreateProcess.
+// The keyfile is therefore readable here. We decrypt the secrets store and
+// append CODENAME=value pairs to env before building the CreateProcess env
+// block. The AppContainer child (and its children via env inheritance) receive
+// plaintext values. The keyfile itself is NOT granted to the container, so it
+// remains unreadable from inside — the container cannot re-read the raw sealed
+// store even though the plaintext is now in env. The stronger model (keeping
+// plaintext out of the child env entirely via an out-of-container IPC broker)
+// is a future refinement and is NOT implemented here.
+//
 // On ANY setup failure this returns an error. The caller MUST fail closed.
 func (c appcontainerConfiner) LaunchConfined(policy Policy, argv []string, env []string, dir string) (int, error) {
 	if len(argv) == 0 {
@@ -89,6 +102,14 @@ func (c appcontainerConfiner) LaunchConfined(policy Policy, argv []string, env [
 	if err := grantPaths(sidStr, policy, argv, env); err != nil {
 		return 0, fmt.Errorf("confine/windows: icacls grant: %w", err)
 	}
+
+	// ── Step 2b: inject secrets into child env BEFORE CreateProcess ──────────
+	// This runs in the unconfined engine process, so the keyfile is readable.
+	// Non-fatal: if the store cannot be opened or resolved, proceed without
+	// injection. Values are appended last so they override earlier duplicates
+	// (CreateProcess env block: last KEY=VALUE for a given KEY wins on Windows
+	// when CREATE_UNICODE_ENVIRONMENT is set).
+	env = windowsInjectSecrets(env)
 
 	// ── Step 3: build SECURITY_CAPABILITIES ─────────────────────────────────
 	secCaps := securityCapabilities{
@@ -412,6 +433,29 @@ func buildEnvBlock(env []string) (*uint16, error) {
 		block = []uint16{0, 0}
 	}
 	return &block[0], nil
+}
+
+// windowsInjectSecrets returns env (a copy if augmented) with CODENAME=value
+// pairs appended for every secret in the store. Non-fatal: returns env
+// unchanged if the store cannot be opened or resolved.
+func windowsInjectSecrets(env []string) []string {
+	st, err := secrets.Open()
+	if err != nil {
+		return env
+	}
+	vals, err := st.Resolve()
+	if err != nil {
+		return env
+	}
+	if len(vals) == 0 {
+		return env
+	}
+	out := make([]string, len(env), len(env)+len(vals))
+	copy(out, env)
+	for codename, val := range vals {
+		out = append(out, codename+"="+val)
+	}
+	return out
 }
 
 func platformConfiner() Confiner { return appcontainerConfiner{} }
