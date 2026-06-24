@@ -1,0 +1,16 @@
+# build artifacts
+/projx-engine
+/projx-engine.exe
+*.exe
+*.test
+
+# per-project engine runtime state (store db, history, compiled context, jail shims)
+.projx/
+.runtime/
+/data/
+/data-*/
+/dist/
+
+# local workspace file — the module builds via go.mod replace directives
+go.work
+go.work.sum
