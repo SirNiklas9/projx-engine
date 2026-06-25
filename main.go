@@ -11,10 +11,24 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/SirNiklas9/projx-engine/internal/confine"
+	confine "github.com/BananaLabs-OSS/Pulp-ext-confine/core"
+	egress "github.com/BananaLabs-OSS/Pulp-ext-egress/core"
+	"github.com/SirNiklas9/projx-engine/internal/secrets"
 )
 
 func main() {
+	// Wire the Landlock hook BEFORE calling egress.Init(). When the engine is
+	// re-exec'd as an egress gateway child (NETGW_MODE=child), Init() will call
+	// this hook right before syscall.Exec, applying FS confinement inside the
+	// already-established network namespace.
+	egress.PreExecHook = confine.ApplyLandlockFromEnv
+
+	// egress.Init() MUST be called before any other dispatch. On Linux, if this
+	// binary was re-exec'd as a gateway child (NETGW_MODE=child), Init() handles
+	// the child lifecycle (netns setup + PreExecHook + syscall.Exec) and exits.
+	// On non-Linux platforms this is a no-op.
+	egress.Init()
+
 	// Multi-call (busybox-style) dispatch — MUST be the very first thing in main.
 	// If the binary was invoked under a name other than "projx-engine" AND the
 	// jail has set PROJX_REAL_PATH, this is a shim invocation: route through the
@@ -98,6 +112,10 @@ func main() {
 // It builds a DefaultPolicy from <root> and then calls confine.RunConfinedLaunch,
 // which applies Landlock and replaces this process via syscall.Exec.
 // On non-Linux this always exits 1 (fail-closed).
+//
+// Extra path grants are conveyed via environment variables set by runAgentCmd:
+//   PROJX_ALLOW_READ  — os.PathListSeparator-separated list of extra RO paths
+//   PROJX_ALLOW_WRITE — os.PathListSeparator-separated list of extra RW paths
 func runConfinedLaunchCmd(args []string) {
 	if len(args) < 2 {
 		fmt.Fprintln(os.Stderr, "projx-engine: __confined-launch requires <root> <agent> [args...]")
@@ -115,6 +133,31 @@ func runConfinedLaunchCmd(args []string) {
 	}
 
 	policy := confine.DefaultPolicy(root, jailDir, agentDir)
+
+	// Extend the policy with any extra path grants passed from runAgentCmd.
+	// These are os.PathListSeparator-separated absolute paths; we filter to
+	// existing paths (same as DefaultPolicy does for its own entries).
+	if extraRead := os.Getenv("PROJX_ALLOW_READ"); extraRead != "" {
+		policy.ReadOnly = append(policy.ReadOnly,
+			confine.ExistingPaths(strings.Split(extraRead, string(os.PathListSeparator)))...)
+	}
+	if extraWrite := os.Getenv("PROJX_ALLOW_WRITE"); extraWrite != "" {
+		policy.ReadWrite = append(policy.ReadWrite,
+			confine.ExistingPaths(strings.Split(extraWrite, string(os.PathListSeparator)))...)
+	}
+
+	// Inject secrets into the process environment BEFORE the confinement
+	// boundary is applied. RunConfinedLaunch (core) uses os.Environ() for the
+	// exec env, so setting env vars here propagates them into the confined child.
+	// Non-fatal: if the store cannot be opened, proceed without injection.
+	if st, stErr := secrets.Open(); stErr == nil {
+		if vals, vErr := st.Resolve(); vErr == nil {
+			for codename, val := range vals {
+				_ = os.Setenv(codename, val)
+			}
+		}
+	}
+
 	confine.RunConfinedLaunch(policy, agentArgs) // never returns
 }
 
@@ -141,11 +184,14 @@ Real commands:
   run [--dry-run] <task>                  triage task → deterministic op or agent
                                             --dry-run: print decision, no execution
                                             policy: .projx/routing.json (optional)
-
-Stubbed (not yet):
-  secret set <CODENAME>
-  secret ls
-  agent run [prompt]
+  secret set <CODENAME>                   seal a secret (reads value from stdin)
+  secret ls                               list sealed secret codenames (no values)
+  secret rm <CODENAME>                    delete a sealed secret
+  agent run [-- <agent-args>]             launch agent inside sandbox with ambient store context
+                                            --allow <bin>         add to exec allowlist
+                                            --allow-host <host>   add to egress allowlist
+                                            --allow-read <path>   extra FS read grant
+                                            --allow-write <path>  extra FS write grant
 `)
 }
 
