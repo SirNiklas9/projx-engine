@@ -81,9 +81,13 @@ func VerifyLoop(task string, maxIters int, runAgent func(taskWithFeedback string
 // not the agent's claim — the binding-triad's third leg.
 func runVerifyLoopCmd(absRoot string, args []string) {
 	maxIters := 3
+	caged := false
 	var taskParts []string
 	for i := 0; i < len(args); {
 		switch args[i] {
+		case "--caged":
+			caged = true
+			i++
 		case "--max":
 			i++
 			if i >= len(args) {
@@ -105,11 +109,16 @@ func runVerifyLoopCmd(absRoot string, args []string) {
 	}
 	task := strings.TrimSpace(strings.Join(taskParts, " "))
 	if task == "" {
-		die("usage: verify-loop [--max N] -- <task>")
+		die("usage: verify-loop [--max N] [--caged] -- <task>")
 	}
 
 	res, err := VerifyLoop(task, maxIters,
-		func(t string) error { return runAgentHeadless(absRoot, t) },
+		func(t string) error {
+			if caged {
+				return runAgentCaged(absRoot, t) // opt-in, Linux-only
+			}
+			return runAgentHeadless(absRoot, t) // cross-platform default
+		},
 		func() ([]string, error) { return verifyViolations(absRoot) },
 	)
 	if err != nil {
@@ -132,16 +141,26 @@ func runVerifyLoopCmd(absRoot string, args []string) {
 // works in absRoot; the verify-loop checks the result. Agent-agnostic: the
 // command, not this code, knows how each agent runs headless. (Caged headless
 // runs via RunCagedAgent are the next integration.)
-func runAgentHeadless(absRoot, task string) error {
+// headlessAgentArgv resolves the configured agent into a command + args for a
+// non-interactive run on the task. PROJX_AGENT_CMD (set by routing/profile)
+// carries the agent and any print-mode flag; the bare default is "claude -p".
+// Agent-agnostic: the command, not this code, knows how each agent runs headless.
+func headlessAgentArgv(task string) (string, []string) {
 	agentCmd := os.Getenv("PROJX_AGENT_CMD")
 	var fields []string
 	if agentCmd == "" {
-		fields = []string{"claude", "-p"} // sane default for the reference agent
+		fields = []string{"claude", "-p"}
 	} else {
 		fields = strings.Fields(agentCmd)
 	}
-	argv := append(fields[1:], task)
-	cmd := exec.Command(fields[0], argv...)
+	return fields[0], append(fields[1:], task)
+}
+
+// runAgentHeadless runs the agent UNCAGED — the cross-platform default. Per
+// feedback-cage-optional-not-required, caging is opt-in (--caged → runAgentCaged).
+func runAgentHeadless(absRoot, task string) error {
+	name, argv := headlessAgentArgv(task)
+	cmd := exec.Command(name, argv...)
 	cmd.Dir = absRoot
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout

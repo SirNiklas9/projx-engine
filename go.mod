@@ -3,8 +3,11 @@ module github.com/SirNiklas9/projx-engine
 go 1.25.6
 
 require (
+	github.com/BananaLabs-OSS/Pulp-cage v0.0.0
 	github.com/BananaLabs-OSS/Pulp-ext-confine v0.0.0
 	github.com/BananaLabs-OSS/Pulp-ext-egress v0.0.0
+	github.com/BananaLabs-OSS/Pulp-ext-fuse v0.0.0
+	github.com/BananaLabs-OSS/Pulp-grants v0.0.0
 	github.com/SirNiklas9/projx-core v0.0.0
 	github.com/SirNiklas9/projx-store v0.0.0
 	github.com/SirNiklas9/projx-verify v0.0.0
@@ -16,6 +19,7 @@ require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/btree v1.1.3 // indirect
 	github.com/google/uuid v1.6.0 // indirect
+	github.com/hanwen/go-fuse/v2 v2.7.2 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/odvcencio/gotreesitter v0.20.2 // indirect
@@ -58,3 +62,5 @@ replace github.com/BananaLabs-OSS/Pulp-ext-fuse => ../Pulp-ext-fuse
 replace github.com/BananaLabs-OSS/Pulp-grants => ../Pulp-grants
 
 replace github.com/BananaLabs-OSS/Pulp => ../Pulp
+
+replace github.com/BananaLabs-OSS/Pulp-cage => ../Pulp-cage
