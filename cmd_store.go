@@ -26,7 +26,7 @@ func openStore(absRoot string) *store.SQLite {
 
 func runStoreCmd(absRoot string, args []string) {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: store <get|list|query|commit|rm|log|undo|revert|cherry-pick|checkout>")
+		fmt.Fprintln(os.Stderr, "usage: store <get|list|query|commit|rm|log|undo|revert|cherry-pick|checkout|seed>")
 		os.Exit(1)
 	}
 	sub, rest := args[0], args[1:]
@@ -39,6 +39,8 @@ func runStoreCmd(absRoot string, args []string) {
 		storeQuery(absRoot, rest)
 	case "commit":
 		storeCommit(absRoot, rest)
+	case "seed":
+		storeSeed(absRoot, rest)
 	case "rm":
 		storeRm(absRoot, rest)
 	case "log":
