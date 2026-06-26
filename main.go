@@ -96,6 +96,8 @@ func main() {
 		runVerifyCmd(absRoot, rest)
 	case "verify-loop":
 		runVerifyLoopCmd(absRoot, rest)
+	case "serve":
+		runServeCmd(absRoot, rest)
 	case "secret":
 		runSecretCmd(rest)
 	case "agent":
