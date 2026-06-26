@@ -18,26 +18,33 @@ import (
 // (secrets), egress is the seeded allowlist, and misses fail closed (no human to
 // approve during an autonomous loop). Per feedback-cage-optional-not-required
 // this is additive — runAgentHeadless (uncaged) is the cross-platform default.
-func runAgentCaged(absRoot, task string) error {
+// buildCageSpec composes the cage spec for a project: the whole project RW
+// (empty-prefix catch-all) EXCEPT gate prefixes (denied → OnMiss → approver),
+// the seeded egress allowlist, and the resolved agent argv. The approver + store
+// are injected so the SAME composition serves both the autonomous verify-loop
+// (deny-approver, throwaway store) and the control plane (the live PermHub +
+// persistent grants store).
+func buildCageSpec(absRoot, task string, approver grants.Approver, gstore grants.GrantStore) cage.AgentSpec {
 	cfg := loadCageConfig(absRoot)
-
-	// FUSE static policy: whole project RW (empty-prefix catch-all), with gate
-	// prefixes denied (None → OnMiss → the deny-approver → blocked).
 	rules := []fusecore.Rule{{Prefix: "", Access: fusecore.ReadWrite}}
 	for _, p := range gatePrefixes(absRoot) {
 		rules = append(rules, fusecore.Rule{Prefix: p, Access: fusecore.None})
 	}
-
 	name, args := resolveAgentArgv(absRoot, task)
-	spec := cage.AgentSpec{
+	return cage.AgentSpec{
 		Argv:        append([]string{name}, args...),
 		ProjectRoot: absRoot,
-		Store:       grants.NewMemStore(),
-		Approver:    denyApprover{}, // autonomous → fail closed on misses
+		Store:       gstore,
+		Approver:    approver,
 		NetAllow:    cfg.NetAllow,
 		FSAllow:     rules,
 		Env:         map[string]string{"PROJX_AGENT_CONTEXT": "1"},
 	}
+}
+
+func runAgentCaged(absRoot, task string) error {
+	// Autonomous verify-loop run: fail closed on misses (no human in the loop).
+	spec := buildCageSpec(absRoot, task, denyApprover{}, grants.NewMemStore())
 	res, err := cage.RunCagedAgent(spec)
 	if err != nil {
 		return err

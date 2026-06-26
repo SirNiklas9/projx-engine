@@ -163,6 +163,10 @@ type controlServer struct {
 	root  string
 	hub   *PermHub
 	store grants.GrantStore
+
+	runsMu sync.Mutex
+	runs   map[string]*agentRun
+	runSeq int
 }
 
 func (s *controlServer) routes() *http.ServeMux {
@@ -174,6 +178,8 @@ func (s *controlServer) routes() *http.ServeMux {
 	mux.HandleFunc("POST /api/perms/revoke", s.handleGrantsRevoke)
 	mux.HandleFunc("GET /api/store", s.handleStoreQuery)
 	mux.HandleFunc("GET /api/profile", s.handleProfile)
+	mux.HandleFunc("POST /api/agent/run", s.handleAgentRun)
+	mux.HandleFunc("GET /api/agent/runs", s.handleAgentRuns)
 	return mux
 }
 
