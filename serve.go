@@ -295,6 +295,7 @@ func runServeCmd(absRoot string, args []string) {
 			i++
 		}
 	}
+	autoSeed(absRoot) // fresh project? seed floor + detected stack — no manual `store seed`
 	gstore, err := grants.OpenSQLiteStore(grantsDBPath(absRoot))
 	if err != nil {
 		die("serve: open grants store: %v", err)

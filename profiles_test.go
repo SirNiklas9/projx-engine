@@ -125,6 +125,38 @@ func TestCageConfigWiring(t *testing.T) {
 	}
 }
 
+// TestAutoSeed proves a fresh project self-seeds (floor + detected stack) and is
+// idempotent — so nobody ever has to run `store seed`.
+func TestAutoSeed(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	count := func() int {
+		st, err := store.Open(filepath.Join(root, ".projx", "store.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer st.Close()
+		return len(st.List(store.Filter{}))
+	}
+
+	autoSeed(root) // fresh → floor + go
+	n1 := count()
+	if n1 < 9 { // 4 floor conventions + 4 gates + 1 go convention
+		t.Fatalf("auto-seed should populate a fresh store, got %d records", n1)
+	}
+	if cj, err := os.ReadFile(filepath.Join(root, ".projx", "cage.json")); err != nil || !strings.Contains(string(cj), "proxy.golang.org") {
+		t.Errorf("go stack not auto-detected into cage.json: %v", err)
+	}
+
+	autoSeed(root) // already seeded → must be a no-op
+	if n2 := count(); n2 != n1 {
+		t.Errorf("auto-seed not idempotent: %d -> %d records", n1, n2)
+	}
+}
+
 func contains(s []string, v string) bool {
 	for _, x := range s {
 		if x == v {

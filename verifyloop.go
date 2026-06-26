@@ -80,6 +80,7 @@ func VerifyLoop(task string, maxIters int, runAgent func(taskWithFeedback string
 // violations, and repeat until clean or N iterations. The CHECK decides success,
 // not the agent's claim — the binding-triad's third leg.
 func runVerifyLoopCmd(absRoot string, args []string) {
+	autoSeed(absRoot)
 	maxIters := 3
 	caged := false
 	var taskParts []string

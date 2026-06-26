@@ -242,6 +242,46 @@ func storeSeed(absRoot string, args []string) {
 	fmt.Printf("seeded %d record(s) [%s] into %s\n", n, applied, filepath.Join(absRoot, ".projx"))
 }
 
+// autoSeed seeds the floor + the detected stack into a FRESH project store (one
+// with zero records). Idempotent: a project that already has knowledge is left
+// untouched. This is why you never run `store seed` — opening or serving a
+// project does it. Best-effort: a seed failure is non-fatal.
+func autoSeed(absRoot string) {
+	st := openStore(absRoot)
+	defer st.Close()
+	if len(st.List(store.Filter{})) > 0 {
+		return // already has knowledge; never clobber
+	}
+	stacks := detectStacks(absRoot)
+	if n, err := Seed(st, absRoot, stacks); err == nil && n > 0 {
+		fmt.Fprintf(os.Stderr, "projx-engine: auto-seeded floor%s (%d records) — edit in the Store pane or `store rm`\n",
+			stackSuffix(stacks), n)
+	}
+}
+
+// detectStacks infers the project's stacks from marker files at the root.
+func detectStacks(absRoot string) []string {
+	has := func(f string) bool { _, err := os.Stat(filepath.Join(absRoot, f)); return err == nil }
+	var out []string
+	if has("go.mod") {
+		out = append(out, "go")
+	}
+	if has("package.json") {
+		out = append(out, "node")
+	}
+	if has("pyproject.toml") || has("requirements.txt") || has("setup.py") {
+		out = append(out, "python")
+	}
+	return out
+}
+
+func stackSuffix(stacks []string) string {
+	if len(stacks) == 0 {
+		return ""
+	}
+	return " + " + strings.Join(stacks, ", ")
+}
+
 // CageConfig is the seeded .projx/cage.json: a project's default egress
 // allowlist + exec-jail tools, written by Seed and read by the agent launch.
 type CageConfig struct {

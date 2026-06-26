@@ -26,6 +26,8 @@ import (
 )
 
 func runAgentCmd(absRoot string, args []string) {
+	autoSeed(absRoot) // fresh project? seed floor + detected stack first
+
 	// ── Step 1: parse flags ───────────────────────────────────────────────────
 	var allowBins []string   // extra allowlisted exec basenames from --allow
 	var allowHosts []string  // extra allowlisted net hostnames from --allow-host
