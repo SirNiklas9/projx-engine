@@ -141,25 +141,11 @@ func runVerifyLoopCmd(absRoot string, args []string) {
 // works in absRoot; the verify-loop checks the result. Agent-agnostic: the
 // command, not this code, knows how each agent runs headless. (Caged headless
 // runs via RunCagedAgent are the next integration.)
-// headlessAgentArgv resolves the configured agent into a command + args for a
-// non-interactive run on the task. PROJX_AGENT_CMD (set by routing/profile)
-// carries the agent and any print-mode flag; the bare default is "claude -p".
-// Agent-agnostic: the command, not this code, knows how each agent runs headless.
-func headlessAgentArgv(task string) (string, []string) {
-	agentCmd := os.Getenv("PROJX_AGENT_CMD")
-	var fields []string
-	if agentCmd == "" {
-		fields = []string{"claude", "-p"}
-	} else {
-		fields = strings.Fields(agentCmd)
-	}
-	return fields[0], append(fields[1:], task)
-}
-
 // runAgentHeadless runs the agent UNCAGED — the cross-platform default. Per
 // feedback-cage-optional-not-required, caging is opt-in (--caged → runAgentCaged).
+// The agent command is resolved agnostically via resolveAgentArgv (agents.go).
 func runAgentHeadless(absRoot, task string) error {
-	name, argv := headlessAgentArgv(task)
+	name, argv := resolveAgentArgv(absRoot, task)
 	cmd := exec.Command(name, argv...)
 	cmd.Dir = absRoot
 	cmd.Stdin = os.Stdin

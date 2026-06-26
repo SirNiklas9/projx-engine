@@ -28,7 +28,7 @@ func runAgentCaged(absRoot, task string) error {
 		rules = append(rules, fusecore.Rule{Prefix: p, Access: fusecore.None})
 	}
 
-	name, args := headlessAgentArgv(task)
+	name, args := resolveAgentArgv(absRoot, task)
 	spec := cage.AgentSpec{
 		Argv:        append([]string{name}, args...),
 		ProjectRoot: absRoot,
