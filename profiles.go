@@ -241,3 +241,41 @@ func storeSeed(absRoot string, args []string) {
 	}
 	fmt.Printf("seeded %d record(s) [%s] into %s\n", n, applied, filepath.Join(absRoot, ".projx"))
 }
+
+// CageConfig is the seeded .projx/cage.json: a project's default egress
+// allowlist + exec-jail tools, written by Seed and read by the agent launch.
+type CageConfig struct {
+	NetAllow []string `json:"netAllow"`
+	Tools    []string `json:"tools"`
+}
+
+// loadCageConfig reads .projx/cage.json if present. An absent file yields an
+// empty config (un-seeded projects just use flag-supplied values) — never an error.
+func loadCageConfig(absRoot string) CageConfig {
+	var c CageConfig
+	if data, err := os.ReadFile(filepath.Join(absRoot, ".projx", "cage.json")); err == nil {
+		_ = json.Unmarshal(data, &c)
+	}
+	return c
+}
+
+// mergeAllowlists folds the seeded profile config into the flag-supplied
+// allowlists (profile first, flags extend), de-duplicated. Agent-agnostic: the
+// profile — not the agent — supplies the defaults.
+func mergeAllowlists(cage CageConfig, allowHosts, allowBins []string) (hosts, bins []string) {
+	hosts = dedupStrings(append(append([]string{}, cage.NetAllow...), allowHosts...))
+	bins = dedupStrings(append(append([]string{}, cage.Tools...), allowBins...))
+	return
+}
+
+func dedupStrings(in []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, s := range in {
+		if s != "" && !seen[s] {
+			seen[s] = true
+			out = append(out, s)
+		}
+	}
+	return out
+}

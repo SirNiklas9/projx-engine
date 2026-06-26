@@ -68,7 +68,13 @@ func runAgentCmd(absRoot string, args []string) {
 	// needs to be a "brokered" name.
 	// Shells are intentionally absent from the default. If the user explicitly
 	// passes --allow powershell that is their call; we do not add shells here.
-	effectiveAllowBins := append([]string{"git", "projx-engine"}, allowBins...)
+	// Merge the seeded profile (.projx/cage.json) into the allowlists so a seeded
+	// project inherits its profile's egress hosts + tools without repeating
+	// --allow/--allow-host. Flags still extend it. Agent-agnostic: the profile —
+	// not the agent — supplies these defaults.
+	allowHosts, allowBins = mergeAllowlists(loadCageConfig(absRoot), allowHosts, allowBins)
+
+	effectiveAllowBins := dedupStrings(append([]string{"git", "projx-engine"}, allowBins...))
 
 	// ── Step 2: resolve the agent command (BEFORE any jail/PATH change) ───────
 	// Capture the real PATH now, before we modify anything.

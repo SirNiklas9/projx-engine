@@ -21,6 +21,7 @@ func TestSeedFloorAndGo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer st.Close()
 
 	n, err := Seed(st, root, []string{"go"})
 	if err != nil {
@@ -85,4 +86,60 @@ func readFile(t *testing.T, path string) string {
 		t.Fatal(err)
 	}
 	return string(b)
+}
+
+// TestCageConfigWiring proves the seeded cage.json flows into the agent launch's
+// allowlists: profile hosts/tools appear, flags extend, duplicates collapse, and
+// an un-seeded project yields an empty (non-panicking) config.
+func TestCageConfigWiring(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".projx"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(filepath.Join(root, ".projx", "store.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if _, err := Seed(st, root, []string{"go"}); err != nil {
+		t.Fatal(err)
+	}
+
+	hosts, bins := mergeAllowlists(loadCageConfig(root), []string{"extra.host"}, []string{"git"})
+	for _, h := range []string{"api.anthropic.com", "proxy.golang.org", "extra.host"} {
+		if !contains(hosts, h) {
+			t.Errorf("hosts missing %s: %v", h, hosts)
+		}
+	}
+	for _, b := range []string{"go", "gofmt"} {
+		if !contains(bins, b) {
+			t.Errorf("bins missing %s: %v", b, bins)
+		}
+	}
+	if n := countStr(bins, "git"); n != 1 {
+		t.Errorf("git not deduped (%d): %v", n, bins)
+	}
+
+	if empty := loadCageConfig(t.TempDir()); len(empty.NetAllow) != 0 || len(empty.Tools) != 0 {
+		t.Error("absent cage.json should yield an empty config")
+	}
+}
+
+func contains(s []string, v string) bool {
+	for _, x := range s {
+		if x == v {
+			return true
+		}
+	}
+	return false
+}
+
+func countStr(s []string, v string) int {
+	n := 0
+	for _, x := range s {
+		if x == v {
+			n++
+		}
+	}
+	return n
 }
