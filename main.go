@@ -94,6 +94,8 @@ func main() {
 		runGateCmd(absRoot, rest)
 	case "verify":
 		runVerifyCmd(absRoot, rest)
+	case "verify-loop":
+		runVerifyLoopCmd(absRoot, rest)
 	case "secret":
 		runSecretCmd(rest)
 	case "agent":
