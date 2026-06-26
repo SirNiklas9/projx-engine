@@ -99,7 +99,7 @@ func loadAgents(absRoot string) map[string]AgentTemplate {
 // otherwise the PROJX_AGENT-named template is rendered with the tier model
 // (PROJX_AGENT_MODEL) and the steering file (PROJX_STORE_CONTEXT_FILE). An
 // unknown agent name is treated as a bare command. Agent-agnostic by data.
-func resolveAgentArgv(absRoot, task string) (string, []string) {
+func resolveAgentArgv(absRoot, task string, opts renderOpts) (string, []string) {
 	if cmd := strings.TrimSpace(os.Getenv("PROJX_AGENT_CMD")); cmd != "" {
 		f := strings.Fields(cmd)
 		return f[0], append(f[1:], task)
@@ -112,8 +112,46 @@ func resolveAgentArgv(absRoot, task string) (string, []string) {
 	if !ok {
 		return name, []string{task}
 	}
-	return tmpl.render(task, renderOpts{
+	return tmpl.render(task, opts)
+}
+
+// prepareAgentContext compiles the store preamble, writes .projx/agent-context.md,
+// and returns the context file + the env that delivers it. This is "the rest of
+// the engine work for the AI": even UNCAGED, the agent gets the steering/contract
+// + gates-as-context + model — not a bare CLI.
+func prepareAgentContext(absRoot string) (ctxFile string, env map[string]string) {
+	st := openStore(absRoot)
+	preamble := compileStorePreamble(st)
+	st.Close()
+	ctxFile, _ = writeAgentContextText(absRoot, preamble)
+	env = map[string]string{
+		"PROJX_STORE_CONTEXT": preamble,
+		"PROJX_AGENT_CONTEXT": "1",
+	}
+	if ctxFile != "" {
+		env["PROJX_STORE_CONTEXT_FILE"] = ctxFile
+	}
+	return ctxFile, env
+}
+
+// agentLaunch resolves the agent command AND prepares the store context in one
+// step, returning argv + the env that delivers the contract + model. Every launch
+// path (uncaged headless, caged spec, serve) uses it, so the engine's work is
+// applied uniformly — cage or no cage.
+func agentLaunch(absRoot, task string) (name string, argv []string, env map[string]string) {
+	ctxFile, env := prepareAgentContext(absRoot)
+	name, argv = resolveAgentArgv(absRoot, task, renderOpts{
 		Model:            os.Getenv("PROJX_AGENT_MODEL"),
-		SystemPromptFile: os.Getenv("PROJX_STORE_CONTEXT_FILE"),
+		SystemPromptFile: ctxFile,
 	})
+	return name, argv, env
+}
+
+// kvSlice turns an env map into "k=v" entries for exec.Cmd.Env.
+func kvSlice(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for k, v := range m {
+		out = append(out, k+"="+v)
+	}
+	return out
 }

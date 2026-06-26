@@ -30,7 +30,7 @@ func buildCageSpec(absRoot, task string, approver grants.Approver, gstore grants
 	for _, p := range gatePrefixes(absRoot) {
 		rules = append(rules, fusecore.Rule{Prefix: p, Access: fusecore.None})
 	}
-	name, args := resolveAgentArgv(absRoot, task)
+	name, args, env := agentLaunch(absRoot, task)
 	return cage.AgentSpec{
 		Argv:        append([]string{name}, args...),
 		ProjectRoot: absRoot,
@@ -38,7 +38,7 @@ func buildCageSpec(absRoot, task string, approver grants.Approver, gstore grants
 		Approver:    approver,
 		NetAllow:    cfg.NetAllow,
 		FSAllow:     rules,
-		Env:         map[string]string{"PROJX_AGENT_CONTEXT": "1"},
+		Env:         env,
 	}
 }
 

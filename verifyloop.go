@@ -145,9 +145,10 @@ func runVerifyLoopCmd(absRoot string, args []string) {
 // feedback-cage-optional-not-required, caging is opt-in (--caged → runAgentCaged).
 // The agent command is resolved agnostically via resolveAgentArgv (agents.go).
 func runAgentHeadless(absRoot, task string) error {
-	name, argv := resolveAgentArgv(absRoot, task)
+	name, argv, env := agentLaunch(absRoot, task)
 	cmd := exec.Command(name, argv...)
 	cmd.Dir = absRoot
+	cmd.Env = append(os.Environ(), kvSlice(env)...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

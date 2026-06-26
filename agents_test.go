@@ -5,7 +5,47 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	store "github.com/SirNiklas9/projx-store"
 )
+
+// TestPrepareAgentContext proves "the rest of the engine work" reaches the agent
+// even uncaged: the seeded contract is compiled into a context file, the env
+// carries it, and it's threaded into the agent invocation.
+func TestPrepareAgentContext(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".projx"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(filepath.Join(root, ".projx", "store.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Seed(st, root, nil); err != nil { // floor: conventions + gates
+		t.Fatal(err)
+	}
+	st.Close()
+
+	ctxFile, env := prepareAgentContext(root)
+	if ctxFile == "" {
+		t.Fatal("no context file produced")
+	}
+	if _, err := os.Stat(ctxFile); err != nil {
+		t.Fatalf("context file missing on disk: %v", err)
+	}
+	if !strings.Contains(env["PROJX_STORE_CONTEXT"], "secret/**") {
+		t.Error("seeded gate not present in compiled context")
+	}
+	if env["PROJX_AGENT_CONTEXT"] != "1" {
+		t.Error("PROJX_AGENT_CONTEXT flag not set")
+	}
+
+	// The context file is threaded into the agent's invocation (uncaged path too).
+	name, argv := resolveAgentArgv(root, "do x", renderOpts{SystemPromptFile: ctxFile})
+	if joined := name + " " + strings.Join(argv, " "); !strings.Contains(joined, "--append-system-prompt-file "+ctxFile) {
+		t.Errorf("context file not threaded into agent argv: %s", joined)
+	}
+}
 
 func TestAgentTemplateRender(t *testing.T) {
 	cl := builtinAgents["claude"]
@@ -50,7 +90,7 @@ func TestResolveAgentFromFileAndOverride(t *testing.T) {
 	t.Setenv("PROJX_AGENT_CMD", "")
 	t.Setenv("PROJX_AGENT", "codex")
 	t.Setenv("PROJX_AGENT_MODEL", "gpt-x")
-	name, args := resolveAgentArgv(root, "fix bug")
+	name, args := resolveAgentArgv(root, "fix bug", renderOpts{Model: "gpt-x"})
 	got := name + " " + strings.Join(args, " ")
 	if !strings.Contains(got, "codex exec fix bug") || !strings.Contains(got, "--model gpt-x") {
 		t.Errorf("codex template not resolved: %s", got)
@@ -58,7 +98,7 @@ func TestResolveAgentFromFileAndOverride(t *testing.T) {
 
 	// An explicit PROJX_AGENT_CMD (routing) overrides the template path.
 	t.Setenv("PROJX_AGENT_CMD", "myagent --flag")
-	name, args = resolveAgentArgv(root, "task")
+	name, args = resolveAgentArgv(root, "task", renderOpts{})
 	if name != "myagent" || strings.Join(args, " ") != "--flag task" {
 		t.Errorf("PROJX_AGENT_CMD override wrong: %s %v", name, args)
 	}

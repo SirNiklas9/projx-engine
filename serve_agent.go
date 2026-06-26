@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"os/exec"
 )
 
@@ -80,9 +81,10 @@ func (s *controlServer) handleAgentRuns(w http.ResponseWriter, _ *http.Request) 
 
 // launchAgentUncaged runs the agent directly (no cage) — cross-platform.
 func launchAgentUncaged(absRoot, task string) (int, error) {
-	name, argv := resolveAgentArgv(absRoot, task)
+	name, argv, env := agentLaunch(absRoot, task)
 	cmd := exec.Command(name, argv...)
 	cmd.Dir = absRoot
+	cmd.Env = append(os.Environ(), kvSlice(env)...)
 	if err := cmd.Run(); err != nil {
 		if ee, ok := err.(*exec.ExitError); ok {
 			return ee.ExitCode(), nil
