@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -176,7 +178,11 @@ func (s *controlServer) routes() *http.ServeMux {
 	mux.HandleFunc("POST /api/perms/decide", s.handlePermDecide)
 	mux.HandleFunc("GET /api/perms/grants", s.handleGrantsList)
 	mux.HandleFunc("POST /api/perms/revoke", s.handleGrantsRevoke)
-	mux.HandleFunc("GET /api/store", s.handleStoreQuery)
+	mux.HandleFunc("GET /api/store", s.handleStoreList)
+	mux.HandleFunc("POST /api/store", s.handleStorePut)
+	mux.HandleFunc("DELETE /api/store", s.handleStoreDelete)
+	mux.HandleFunc("GET /api/store/history", s.handleStoreHistory)
+	mux.HandleFunc("POST /api/store/undo", s.handleStoreUndo)
 	mux.HandleFunc("GET /api/profile", s.handleProfile)
 	mux.HandleFunc("POST /api/agent/run", s.handleAgentRun)
 	mux.HandleFunc("GET /api/agent/runs", s.handleAgentRuns)
@@ -258,18 +264,134 @@ func (s *controlServer) handleGrantsRevoke(w http.ResponseWriter, r *http.Reques
 	writeJSONResp(w, map[string]int{"revoked": n})
 }
 
-func (s *controlServer) handleStoreQuery(w http.ResponseWriter, r *http.Request) {
+// storeRecordView is the string-typed record shape the Workbench frontend speaks
+// (kind/scope as names, not ints). The engine serve is the store's backend, so it
+// emits exactly this shape and the cell pure-proxies it.
+type storeRecordView struct {
+	ID    string `json:"id"`
+	Kind  string `json:"kind"`
+	Scope string `json:"scope"`
+	Key   string `json:"key"`
+	Body  string `json:"body"`
+}
+
+// handleStoreList — GET /api/store[?kind=&scope=] -> {"records":[...]}.
+func (s *controlServer) handleStoreList(w http.ResponseWriter, r *http.Request) {
 	st := openStore(s.root)
 	defer st.Close()
-	var recs []store.Record
+	f := store.Filter{}
 	if k := r.URL.Query().Get("kind"); k != "" {
 		if kind, err := parseKindForList(k); err == nil {
-			recs = st.List(store.OfKind(kind))
+			f.Kind = &kind
 		}
-	} else {
-		recs = st.List(store.Filter{})
 	}
-	writeJSONResp(w, recs)
+	if sc := r.URL.Query().Get("scope"); sc != "" {
+		if scope, err := parseScopeName(sc); err == nil {
+			f.Scope = &scope
+		}
+	}
+	views := []storeRecordView{}
+	for _, rec := range st.List(f) {
+		views = append(views, storeRecordView{rec.ID, rec.Kind.String(), rec.Scope.String(), rec.Key, rec.Body})
+	}
+	writeJSONResp(w, map[string]any{"records": views})
+}
+
+// handleStorePut — POST /api/store {id,kind:int,scope:int,key,body}. Derives a
+// stable id when blank (kind/slug(key)), journals the op, and regenerates CLAUDE.md.
+func (s *controlServer) handleStorePut(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		ID    string `json:"id"`
+		Kind  int    `json:"kind"`
+		Scope int    `json:"scope"`
+		Key   string `json:"key"`
+		Body  string `json:"body"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	st := openStore(s.root)
+	defer st.Close()
+	rec := store.Record{ID: body.ID, Kind: store.Kind(body.Kind), Scope: store.Scope(body.Scope), Key: body.Key, Body: body.Body}
+	if strings.TrimSpace(rec.ID) == "" {
+		base := slug(rec.Key)
+		if base == "" {
+			base = slug(rec.Body)
+		}
+		if base == "" {
+			base = "rec"
+		}
+		rec.ID = rec.Kind.String() + "/" + base
+	}
+	before, had := st.Get(rec.ID)
+	if err := st.Put(rec); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	var bp *store.Record
+	if had {
+		bp = &before
+	}
+	recordStoreOp(s.root, "put", "ui", bp, &rec)
+	syncProjectClaudeMD(s.root, st)
+	writeJSONResp(w, map[string]bool{"ok": true})
+}
+
+// handleStoreDelete — DELETE /api/store?id=.
+func (s *controlServer) handleStoreDelete(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("id")
+	if id == "" {
+		http.Error(w, "missing id", http.StatusBadRequest)
+		return
+	}
+	st := openStore(s.root)
+	defer st.Close()
+	before, had := st.Get(id)
+	if err := st.Delete(id); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if had {
+		recordStoreOp(s.root, "delete", "ui", &before, nil)
+	}
+	syncProjectClaudeMD(s.root, st)
+	writeJSONResp(w, map[string]bool{"ok": true})
+}
+
+// handleStoreHistory — GET /api/store/history -> {"revisions":[...]} newest-first.
+func (s *controlServer) handleStoreHistory(w http.ResponseWriter, _ *http.Request) {
+	revs := readRevisions(s.root)
+	for i, j := 0, len(revs)-1; i < j; i, j = i+1, j-1 {
+		revs[i], revs[j] = revs[j], revs[i]
+	}
+	if revs == nil {
+		revs = []storeRevision{}
+	}
+	writeJSONResp(w, map[string]any{"revisions": revs})
+}
+
+// handleStoreUndo — POST /api/store/undo: invert the most recent op, regen CLAUDE.md.
+func (s *controlServer) handleStoreUndo(w http.ResponseWriter, _ *http.Request) {
+	st := openStore(s.root)
+	defer st.Close()
+	rev, ok := undoLastStore(s.root, st)
+	if !ok {
+		writeJSONResp(w, map[string]any{"ok": false, "msg": "nothing to undo"})
+		return
+	}
+	syncProjectClaudeMD(s.root, st)
+	writeJSONResp(w, map[string]any{"ok": true, "undid": rev.Seq, "id": rev.ID})
+}
+
+// syncProjectClaudeMD regenerates the managed block in <root>/CLAUDE.md from the
+// store, preserving user content. The engine owns CLAUDE.md; the renderer is the
+// shared one in projx-store, so engine and cell produce identical output.
+func syncProjectClaudeMD(root string, st store.Store) {
+	path := filepath.Join(root, "CLAUDE.md")
+	existing, _ := os.ReadFile(path)
+	out := store.SpliceManagedBlock(string(existing), store.ManagedBlock(st))
+	_ = os.WriteFile(path, []byte(out), 0o644)
 }
 
 func (s *controlServer) handleProfile(w http.ResponseWriter, _ *http.Request) {

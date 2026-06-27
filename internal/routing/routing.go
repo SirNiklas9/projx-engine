@@ -17,6 +17,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	store "github.com/SirNiklas9/projx-store"
 )
 
 // Decision is the result of a routing decision.
@@ -168,25 +170,11 @@ func Decide(task string, cfg Config) Decision {
 	}
 }
 
-// classifyCapability maps a task to a capability-class string.
-// Priority: deep-reasoning > cheap-fast > default.
+// classifyCapability maps a task to a capability-class string. The classifier is
+// the SINGLE definition in projx-store (store.Classify), shared with the engine
+// cell — this delegates so there is one task->class policy, not two.
 func classifyCapability(task string) string {
-	if containsAny(task,
-		"design", "architect", "architecture", "refactor", "why", "plan",
-		"debug", "diagnose", "analyse", "analyze", "redesign", "strategy",
-		"tradeoff", "trade-off",
-	) {
-		return "deep-reasoning"
-	}
-
-	if containsAny(task,
-		"rename", "typo", "format", "comment", "small", "trivial",
-		"one-liner", "oneliner", "quick fix", "quickfix", "spelling",
-	) {
-		return "cheap-fast"
-	}
-
-	return "default"
+	return store.Classify(task)
 }
 
 // capabilityReason returns a short human explanation for a capability-class.

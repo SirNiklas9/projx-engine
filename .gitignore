@@ -14,3 +14,5 @@
 # local workspace file — the module builds via go.mod replace directives
 go.work
 go.work.sum
+*.wasm
+*.exe~

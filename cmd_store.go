@@ -11,17 +11,64 @@ import (
 	store "github.com/SirNiklas9/projx-store"
 )
 
-// openStore opens (or creates) the project store at <root>/.projx/store.db.
-func openStore(absRoot string) *store.SQLite {
-	dir := filepath.Join(absRoot, ".projx")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+// projectStore is the engine's view of the declared-knowledge store: ONE logical
+// Store (store.Workspace) over TWO physical files — the per-repo PROJECT store
+// (<root>/.projx/store.db, committable, shared with the Workbench) and the
+// per-user YOURS store (global + workspace records that travel with you). Records
+// route to the owning file by Scope.Owner(); callers see a single Store.
+type projectStore struct {
+	*store.Workspace
+	project *store.SQLite
+	yours   *store.SQLite
+}
+
+// Close releases both underlying files.
+func (p *projectStore) Close() error {
+	e1 := p.project.Close()
+	if err := p.yours.Close(); err != nil && e1 == nil {
+		return err
+	}
+	return e1
+}
+
+// yoursDir is the per-user directory for the YOURS store (global + workspace
+// records). PROJX_YOURS_DIR overrides it (tests / custom home); otherwise it is
+// <UserConfigDir>/projx (the same per-user root secrets already use). Empty means
+// no per-user dir is available — the caller falls back to the repo's .projx.
+func yoursDir() string {
+	if d := strings.TrimSpace(os.Getenv("PROJX_YOURS_DIR")); d != "" {
+		return d
+	}
+	if cfg, err := os.UserConfigDir(); err == nil {
+		return filepath.Join(cfg, "projx")
+	}
+	return ""
+}
+
+// openStore opens the project store as a two-file Workspace: project records in
+// <root>/.projx/store.db (stays with the repo, shared with the Workbench), and
+// global+workspace records in the per-user yours store. The engine OWNS the
+// store; every face reads this same file.
+func openStore(absRoot string) *projectStore {
+	projDir := filepath.Join(absRoot, ".projx")
+	if err := os.MkdirAll(projDir, 0o755); err != nil {
 		die("mkdir .projx: %v", err)
 	}
-	st, err := store.Open(filepath.Join(dir, "store.db"))
+	project, err := store.Open(filepath.Join(projDir, "store.db"))
 	if err != nil {
-		die("open store: %v", err)
+		die("open project store: %v", err)
 	}
-	return st
+	yoursPath := filepath.Join(projDir, "yours.db") // fallback when no per-user dir
+	if yd := yoursDir(); yd != "" {
+		if err := os.MkdirAll(yd, 0o755); err == nil {
+			yoursPath = filepath.Join(yd, "store.db")
+		}
+	}
+	yours, err := store.Open(yoursPath)
+	if err != nil {
+		die("open yours store: %v", err)
+	}
+	return &projectStore{Workspace: store.NewWorkspace(yours, project), project: project, yours: yours}
 }
 
 func runStoreCmd(absRoot string, args []string) {
@@ -348,8 +395,10 @@ func parseKindForList(name string) (store.Kind, error) {
 		return store.KGateRule, nil
 	case "declared-structure", "module":
 		return store.KDeclaredStructure, nil
+	case "route":
+		return store.KRoute, nil
 	}
-	return 0, fmt.Errorf("unknown kind %q (recipe|convention|adr|doc|history|gate-rule|declared-structure)", name)
+	return 0, fmt.Errorf("unknown kind %q (recipe|convention|adr|doc|history|gate-rule|declared-structure|route)", name)
 }
 
 // parseScopeName parses a scope string.

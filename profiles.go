@@ -32,29 +32,27 @@ type Profile struct {
 
 type profileRec struct{ Key, Body string }
 
-// floor is the universal base applied to EVERY project.
+// floor is the universal base applied to EVERY project. Its Conventions + Gates
+// (the contract) now live in projx-store as the SINGLE definition
+// (store.FloorConventions / FloorGates), seeded via store.SeedFloor so the native
+// engine and the engine CELL share one floor — no duplication. The Profile here
+// carries only the native-side tiers/net/tools.
 var floor = Profile{
-	Name: "floor",
-	Desc: "universal base — applied to every project",
-	Conventions: []profileRec{
-		{"read before acting", "Read this store contract first. The store is authoritative project knowledge — not any README or .md file. Never act before reading it."},
-		{"commit what you learn", "When you decide or learn something durable, commit it to the store (convention/adr) — not a markdown file."},
-		{"deterministic first", "Prefer deterministic ops (verify, store, tests) over agent reasoning whenever a tool can do the job."},
-		{"secrets by codename", "Never read, edit, or print secret material. Reference secrets only by codename."},
-	},
-	Gates: []profileRec{
-		{"secrets dir", "secret/**"},
-		{"dotenv files", ".env*"},
-		{"private keys", "**/*.key"},
-		{"ssh material", "**/.ssh/**"},
-	},
-	ModelTiers: map[string]string{
-		"cheap-fast":     "claude --model claude-haiku-4-5-20251001", // mechanical: moves, grep, format, classify
-		"default":        "claude --model claude-sonnet-4-6",         // standard: code, tests, review
-		"deep-reasoning": "claude --model claude-opus-4-8",           // hard: architecture, multi-file, debugging
-	},
+	Name:     "floor",
+	Desc:     "universal base — applied to every project",
 	NetAllow: []string{"api.anthropic.com", ".anthropic.com"},
 	Tools:    []string{"git"},
+}
+
+// floor.ModelTiers is built from store.FloorRoutes — the SINGLE model-tier
+// definition (the model IDs live in the store, not hardcoded here), so the native
+// engine, the cell, and the store all agree on the tiers.
+func init() {
+	m := make(map[string]string, len(store.FloorRoutes))
+	for _, r := range store.FloorRoutes {
+		m[r.Key] = r.Body
+	}
+	floor.ModelTiers = m
 }
 
 // stacks layer on top of the floor (opt-in by name).
@@ -114,7 +112,7 @@ func Seed(st store.Store, root string, names []string) (int, error) {
 		seen[n] = true
 	}
 
-	n := 0
+	n := store.SeedFloor(st) // floor contract — single definition in projx-store
 	tiers := map[string]string{}
 	netSet := map[string]bool{}
 	var netAllow, tools []string
@@ -231,6 +229,7 @@ func writeJSON(path string, v any) error {
 // named stacks (e.g. `store seed go node`) to a fresh project store + config.
 func storeSeed(absRoot string, args []string) {
 	st := openStore(absRoot)
+	defer st.Close()
 	n, err := Seed(st, absRoot, args)
 	if err != nil {
 		die("seed: %v", err)
@@ -249,8 +248,8 @@ func storeSeed(absRoot string, args []string) {
 func autoSeed(absRoot string) {
 	st := openStore(absRoot)
 	defer st.Close()
-	if len(st.List(store.Filter{})) > 0 {
-		return // already has knowledge; never clobber
+	if len(st.List(store.InScope(store.ScopeProject))) > 0 {
+		return // project already has declared knowledge; never clobber
 	}
 	stacks := detectStacks(absRoot)
 	if n, err := Seed(st, absRoot, stacks); err == nil && n > 0 {
