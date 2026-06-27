@@ -1,0 +1,18 @@
+schema_version = 1
+
+name    = "projx-engine"
+version = "0.1.0"
+wasm    = "cell.wasm"
+
+# The ENGINE as a cell — the control-plane brain. It serves the store API over
+# the host's transport.http.inbound; storage.sqlite persists the store;
+# storage.fs writes CLAUDE.md + the history journal into the repo. spawn.process
+# is how the cell invokes the NATIVE cage runner (Landlock/netns/FUSE are
+# irreducibly native hands — never in the cell). No cage deps compile into wasm.
+capabilities = ["transport.http.inbound", "storage.fs", "storage.sqlite", "spawn.process", "spawn.pty", "entropy.read"]
+
+call_timeout_ms = 60000
+restart = "on_crash"
+
+[config]
+cell_name = "projx-engine"
