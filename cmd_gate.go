@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	store "github.com/SirNiklas9/projx-store"
@@ -10,7 +11,7 @@ import (
 
 func runGateCmd(absRoot string, args []string) {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: gate <add|list|rm>")
+		fmt.Fprintln(os.Stderr, "usage: gate <add|list|rm|check>")
 		os.Exit(1)
 	}
 	sub, rest := args[0], args[1:]
@@ -21,8 +22,10 @@ func runGateCmd(absRoot string, args []string) {
 		gateList(absRoot, rest)
 	case "rm":
 		gateRm(absRoot, rest)
+	case "check":
+		gateCheck(absRoot, rest)
 	default:
-		fmt.Fprintf(os.Stderr, "unknown gate subcommand %q (add|list|rm)\n", sub)
+		fmt.Fprintf(os.Stderr, "unknown gate subcommand %q (add|list|rm|check)\n", sub)
 		os.Exit(1)
 	}
 }
@@ -65,6 +68,32 @@ func gateList(absRoot string, _ []string) {
 	for _, r := range rules {
 		fmt.Printf("%s\t%s\n", r.ID, r.Body)
 	}
+}
+
+// gateCheck implements `gate check <path>`: exit 2 if the path is denied by a
+// gate rule (with the matching rule on stderr), exit 0 if allowed. This is the
+// "is this path off-limits?" query a per-harness connector's PreToolUse hook
+// calls (exit 2 = the Claude Code hook "block" convention). An absolute path
+// under --root is normalized to a project-relative path before matching.
+func gateCheck(absRoot string, args []string) {
+	if len(args) == 0 {
+		die("usage: gate check <path>")
+	}
+	target := args[0]
+	if filepath.IsAbs(target) {
+		if rel, err := filepath.Rel(absRoot, target); err == nil && !strings.HasPrefix(rel, "..") {
+			target = rel
+		}
+	}
+
+	st := openStore(absRoot)
+	defer st.Close()
+
+	if pat, denied := gateDeniedPath(st, target); denied {
+		fmt.Fprintf(os.Stderr, "gate: DENIED %q by rule %q\n", target, pat)
+		os.Exit(2)
+	}
+	os.Exit(0)
 }
 
 func gateRm(absRoot string, args []string) {

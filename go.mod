@@ -11,6 +11,7 @@ require (
 	github.com/SirNiklas9/projx-core v0.0.0
 	github.com/SirNiklas9/projx-store v0.0.0
 	github.com/SirNiklas9/projx-verify v0.0.0
+	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/landlock-lsm/go-landlock v0.9.0
 	golang.org/x/sys v0.46.0
 )

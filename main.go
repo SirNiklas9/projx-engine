@@ -186,6 +186,7 @@ Real commands:
   gate add <pattern>                      add a gate rule
   gate list                               list gate rules
   gate rm <id-or-pattern>                 remove a gate rule
+  gate check <path>                       exit 0 if allowed, 2 if denied by a gate rule
   verify                                  check declared vs actual boundaries
   context                                 print the compiled store context (preamble) to stdout
   run [--dry-run] <task>                  triage task → deterministic op or agent
