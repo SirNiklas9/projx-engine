@@ -96,6 +96,8 @@ func main() {
 		runVerifyCmd(absRoot, rest)
 	case "verify-loop":
 		runVerifyLoopCmd(absRoot, rest)
+	case "context":
+		runContextCmd(absRoot, rest)
 	case "serve":
 		runServeCmd(absRoot, rest)
 	case "secret":
@@ -185,6 +187,7 @@ Real commands:
   gate list                               list gate rules
   gate rm <id-or-pattern>                 remove a gate rule
   verify                                  check declared vs actual boundaries
+  context                                 print the compiled store context (preamble) to stdout
   run [--dry-run] <task>                  triage task → deterministic op or agent
                                             --dry-run: print decision, no execution
                                             policy: .projx/routing.json (optional)
