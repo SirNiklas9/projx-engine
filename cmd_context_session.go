@@ -169,7 +169,7 @@ func buildSessionContext(absRoot, session, task string, reset bool) string {
 		return out
 	}
 
-	text, seen := store.AgentContextDelta(st, task, cp.Seen)
+	text, seen := store.AgentContextDeltaSel(st, task, cp.Seen, newSelectorFunc())
 	cp.Seen = seen
 	saveCheckpoint(path, cp)
 	return text

@@ -38,8 +38,11 @@ func compileStorePreamble(st store.Store) string {
 // `context --task` (the per-message UserPromptSubmit hook) so each turn injects
 // the least, most-relevant context instead of the whole store. An empty task
 // yields the full preamble (so SessionStart still gets the floor).
+// (newSelectorFunc returns nil unless PROJX_SMART_CONTEXT is set, so the default path is
+// the deterministic v1 token slice with zero model calls; when opted in it selects the
+// relevant records semantically via the cheap model.)
 func compileStorePreambleForTask(st store.Store, task string) string {
-	return store.AgentContextForTask(st, task)
+	return store.AgentContextForTaskSel(st, task, newSelectorFunc())
 }
 
 // writeAgentContextText writes an already-compiled preamble to disk at
