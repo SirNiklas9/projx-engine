@@ -6,18 +6,18 @@ require (
 	github.com/BananaLabs-OSS/Pulp-cage v0.0.0
 	github.com/BananaLabs-OSS/Pulp-ext-confine v0.0.0
 	github.com/BananaLabs-OSS/Pulp-ext-egress v0.0.0
-	github.com/BananaLabs-OSS/Pulp-ext-hook v0.0.0
 	github.com/BananaLabs-OSS/Pulp-ext-fuse v0.0.0
 	github.com/BananaLabs-OSS/Pulp-grants v0.0.0
 	github.com/SirNiklas9/projx-core v0.0.0
 	github.com/SirNiklas9/projx-store v0.0.0
 	github.com/SirNiklas9/projx-verify v0.0.0
-	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/landlock-lsm/go-landlock v0.9.0
 	golang.org/x/sys v0.46.0
 )
 
 require (
+	github.com/BananaLabs-OSS/Pulp-ext-hook v0.0.0 // indirect
+	github.com/bmatcuk/doublestar/v4 v4.10.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/btree v1.1.3 // indirect
 	github.com/google/uuid v1.6.0 // indirect

@@ -16,6 +16,19 @@ func handleGate(c *pulpgin.Context) {
 	c.JSON(200, pulpgin.H{"deny": store.DenyRules(s)})
 }
 
+// handleGateCheck — GET /api/gate/check?path=... -> {"denied":bool,"pattern":".."}. The
+// path-vs-gate decision (the PreToolUse gate), via the SAME shared matcher the native
+// hook uses (store.GateDenied, doublestar glob semantics).
+func handleGateCheck(c *pulpgin.Context) {
+	s, err := openStore()
+	if err != nil {
+		c.JSON(503, pulpgin.H{"error": "store unavailable: " + err.Error()})
+		return
+	}
+	pat, denied := store.GateDenied(s, c.Query("path"))
+	c.JSON(200, pulpgin.H{"path": c.Query("path"), "denied": denied, "pattern": pat})
+}
+
 // handleAgentSpec — GET /api/agent/spec?task=... -> the engine's FULL launch
 // contract for the agent, assembled by the cell (the brain) from the store:
 //   - class/cmd: the routed model tier (auto-provisioned by task)
