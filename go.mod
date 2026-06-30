@@ -6,6 +6,7 @@ require (
 	github.com/BananaLabs-OSS/Pulp-cage v0.0.0
 	github.com/BananaLabs-OSS/Pulp-ext-confine v0.0.0
 	github.com/BananaLabs-OSS/Pulp-ext-egress v0.0.0
+	github.com/BananaLabs-OSS/Pulp-ext-hook v0.0.0
 	github.com/BananaLabs-OSS/Pulp-ext-fuse v0.0.0
 	github.com/BananaLabs-OSS/Pulp-grants v0.0.0
 	github.com/SirNiklas9/projx-core v0.0.0
@@ -40,23 +41,15 @@ require (
 
 replace github.com/SirNiklas9/projx-core => ../projx-core
 
-replace github.com/SirNiklas9/projx-graph => ../projx-graph
-
-replace github.com/SirNiklas9/projx-context => ../projx-context
-
-replace github.com/SirNiklas9/projx-generation => ../projx-generation
-
-replace github.com/SirNiklas9/projx-gloss => ../projx-gloss
-
 replace github.com/SirNiklas9/projx-store => ../projx-store
 
 replace github.com/SirNiklas9/projx-verify => ../projx-verify
 
-replace github.com/SirNiklas9/projx-workflow => ../projx-workflow
-
 replace github.com/BananaLabs-OSS/Pulp-ext-confine => ../Pulp-ext-confine
 
 replace github.com/BananaLabs-OSS/Pulp-ext-egress => ../Pulp-ext-egress
+
+replace github.com/BananaLabs-OSS/Pulp-ext-hook => ../Pulp-ext-hook
 
 replace github.com/BananaLabs-OSS/Pulp-ext-fuse => ../Pulp-ext-fuse
 
