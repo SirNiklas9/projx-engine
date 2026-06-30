@@ -3,10 +3,12 @@
 // API served over transport.http.inbound, persistence via storage.sqlite, files
 // (CLAUDE.md + the history journal) via storage.fs.
 //
-// The native CAGE (Landlock/netns/FUSE) is NOT here — it is irreducibly native
-// "hands" and stays a native capability the cell invokes via spawn.process. This
-// cell is pure logic; it never touches the OS directly. That is the build-on-Pulp
-// law: brain = cell, hands = native capabilities.
+// The CAGE (Landlock/AppContainer/netns) is NOT compiled into this cell — it is
+// irreducibly native "hands". The cell reaches it as a Pulp CAPABILITY
+// (spawn.confine): POST /api/agent/run assembles the contract and calls
+// pulp.Confine.RunCaged, and the host performs the confined launch. This cell is
+// pure logic; it never touches the OS directly. Build-on-Pulp law: brain = cell,
+// hands = Pulp capabilities (no native executor in the path).
 //
 // Build: GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o cell.wasm .
 package main
@@ -41,6 +43,8 @@ func init() {
 		r.GET("/api/route", handleRoute)
 		r.GET("/api/gate", handleGate)
 		r.GET("/api/agent/spec", handleAgentSpec)
+		r.POST("/api/agent/run", handleAgentRun)
+		r.GET("/api/agent/run/status", handleAgentStatus)
 		if err := r.RegisterRoutes(); err != nil {
 			fmt.Println("[projx-engine cell] route registration:", err)
 		}

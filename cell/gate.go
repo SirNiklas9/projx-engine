@@ -16,12 +16,18 @@ func handleGate(c *pulpgin.Context) {
 	c.JSON(200, pulpgin.H{"deny": store.DenyRules(s)})
 }
 
-// handleAgentSpec — GET /api/agent/spec?task=... -> the engine's launch contract
-// for the agent: the routed model tier (auto-provisioned by task) + the gate deny
-// rules. This is "what the AI goes through" — assembled by the engine from the
-// store, handed to whatever actually launches the agent (the Workbench, the CLI,
-// or the native caged runner). The steering itself rides in CLAUDE.md, which the
-// engine already generates from the same store.
+// handleAgentSpec — GET /api/agent/spec?task=... -> the engine's FULL launch
+// contract for the agent, assembled by the cell (the brain) from the store:
+//   - class/cmd: the routed model tier (auto-provisioned by task)
+//   - deny:      the gate off-limits rules as agent file-tool deny rules
+//   - preamble:  the ambient CONTRACT (read-before-act, knowledge-in/out=store,
+//     gate-is-law) + the live store contents, tiered — the positive knowledge the
+//     agent is bound by, rendered from the SAME shared store.AgentPreamble the
+//     native path uses, so cell-assembled and native-assembled contracts are
+//     identical by construction.
+//
+// This is the complete "what the AI goes through", handed to whatever actually
+// launches the agent (the Workbench, or the Pulp host's caged runner).
 func handleAgentSpec(c *pulpgin.Context) {
 	task := c.Query("task")
 	s, err := openStore()
@@ -31,9 +37,10 @@ func handleAgentSpec(c *pulpgin.Context) {
 	}
 	class, cmd := store.Route(s, task)
 	c.JSON(200, pulpgin.H{
-		"task":  task,
-		"class": class,
-		"cmd":   cmd,
-		"deny":  store.DenyRules(s),
+		"task":     task,
+		"class":    class,
+		"cmd":      cmd,
+		"deny":     store.DenyRules(s),
+		"preamble": store.AgentContextForTask(s, task), // task-sliced contract (full floor when task is empty)
 	})
 }
