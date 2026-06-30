@@ -5,13 +5,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/projx-map.sh\"",
+            "command": "projx-engine hook",
             "timeout": 30
-          },
-          {
-            "type": "command",
-            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/projx-context.sh\"",
-            "timeout": 15
           }
         ]
       }
@@ -21,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/projx-context.sh\"",
+            "command": "projx-engine hook",
             "timeout": 15
           }
         ]
@@ -33,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/projx-gate.sh\"",
+            "command": "projx-engine hook",
             "timeout": 10
           }
         ]
@@ -44,8 +39,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/projx-precompact.sh\"",
-            "timeout": 10
+            "command": "projx-engine hook",
+            "timeout": 15
           }
         ]
       }
@@ -55,7 +50,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/projx-stop.sh\"",
+            "command": "projx-engine hook",
             "timeout": 10
           }
         ]

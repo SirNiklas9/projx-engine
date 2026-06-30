@@ -22,11 +22,6 @@ func TestInstallConnectorWritesTree(t *testing.T) {
 	}
 	mustExist := []string{
 		".claude/settings.json",
-		".claude/hooks/projx-context.sh",
-		".claude/hooks/projx-gate.sh",
-		".claude/hooks/projx-precompact.sh",
-		".claude/hooks/projx-stop.sh",
-		".claude/hooks/projx-map.sh",
 		".claude/commands/projx/remember.md",
 		".claude/commands/projx/store.md",
 		".claude/commands/projx/route.md",
