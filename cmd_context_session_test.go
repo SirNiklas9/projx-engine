@@ -26,13 +26,13 @@ func seedSessionStore(t *testing.T, root string) {
 	put("doc/billing", store.KDoc, "billing/checkout", "stripe flow")
 }
 
-func readCheckpoint(t *testing.T, root, session string) sessionCheckpoint {
+func readCheckpoint(t *testing.T, root, session string) store.Checkpoint {
 	t.Helper()
 	data, err := os.ReadFile(sessionCheckpointPath(root, session))
 	if err != nil {
 		t.Fatalf("read checkpoint: %v", err)
 	}
-	var cp sessionCheckpoint
+	var cp store.Checkpoint
 	if err := json.Unmarshal(data, &cp); err != nil {
 		t.Fatalf("unmarshal checkpoint: %v", err)
 	}
@@ -158,7 +158,7 @@ func TestSessionSuggestRemember(t *testing.T) {
 
 	// No commit yet → suggest (exit 2). We exercise the decision logic directly rather
 	// than runSessionSuggestCmd (which calls os.Exit).
-	committed := storeMaxUpdatedAt(mustOpen(t, root)) > cp.FlaggedAt
+	committed := store.MaxUpdatedAt(mustOpen(t, root)) > cp.FlaggedAt
 	if committed {
 		t.Fatal("nothing committed yet — expected committed=false")
 	}
@@ -169,7 +169,7 @@ func TestSessionSuggestRemember(t *testing.T) {
 		t.Fatal(err)
 	}
 	st.Close()
-	if !(storeMaxUpdatedAt(mustOpen(t, root)) > cp.FlaggedAt) {
+	if !(store.MaxUpdatedAt(mustOpen(t, root)) > cp.FlaggedAt) {
 		t.Error("after a commit the store max UpdatedAt should exceed FlaggedAt (no nag)")
 	}
 }
