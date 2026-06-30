@@ -42,6 +42,8 @@ func init() {
 		r.POST("/api/store/undo", handleStoreUndo)
 		r.GET("/api/route", handleRoute)
 		r.GET("/api/gate", handleGate)
+		r.GET("/api/context/floor", handleContextFloor)
+		r.GET("/api/context/slice", handleContextSlice)
 		r.GET("/api/agent/spec", handleAgentSpec)
 		r.POST("/api/agent/run", handleAgentRun)
 		r.GET("/api/agent/run/status", handleAgentStatus)

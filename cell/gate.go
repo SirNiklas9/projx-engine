@@ -35,11 +35,12 @@ func handleAgentSpec(c *pulpgin.Context) {
 		c.JSON(503, pulpgin.H{"error": "store unavailable: " + err.Error()})
 		return
 	}
-	class, cmd := store.Route(s, task)
+	d := store.RouteDecide(s, task, nil) // the decider (pin/floor/@-override/keyword); triage nil in-cell
 	c.JSON(200, pulpgin.H{
 		"task":     task,
-		"class":    class,
-		"cmd":      cmd,
+		"class":    d.Class,
+		"cmd":      d.Cmd,
+		"source":   d.Source,
 		"deny":     store.DenyRules(s),
 		"preamble": store.AgentContextForTask(s, task), // task-sliced contract (full floor when task is empty)
 	})
