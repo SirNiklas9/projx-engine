@@ -65,6 +65,11 @@ merge-safely for you. Then start Claude Code in the project.
 
 ## Notes / scope
 
+- **Deployed-cell mode.** Set `PROJX_CELL_URL=http://<host>:<port>` and `projx-engine hook`
+  drives a DEPLOYED WASM engine cell over HTTP (its `/api/context/*` + `/api/gate/check`
+  endpoints) instead of the local `.projx` store — same connector, same hook contract.
+  Many sessions can point at one cell, sharing its store while each keeps its own
+  per-session checkpoint. Unset → local store (default).
 - **Caged-agent safe.** `projx-engine hook` self-unsets `PROJX_AGENT_CONTEXT` (the
   restricted mode a caged `agent run` sets), so the connector keeps working even when
   Claude was launched inside a ProjX cage.

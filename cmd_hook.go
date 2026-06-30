@@ -24,6 +24,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // hookEvent is the subset of the Claude Code hook payload this handler reads.
@@ -43,7 +44,14 @@ func runHookCmd(absRoot string, _ []string) {
 	// the engine ops the hooks need; the connector always ran with it unset, so do the same.
 	_ = os.Unsetenv("PROJX_AGENT_CONTEXT")
 	data, _ := io.ReadAll(os.Stdin)
-	stdout, stderr, code := handleHook(hookRoot(absRoot, data), data)
+	// PROJX_CELL_URL set → drive the deployed cell over HTTP; else compute locally.
+	var stdout, stderr string
+	var code int
+	if cellURL := strings.TrimSpace(os.Getenv("PROJX_CELL_URL")); cellURL != "" {
+		stdout, stderr, code = handleHookViaCell(cellURL, data)
+	} else {
+		stdout, stderr, code = handleHook(hookRoot(absRoot, data), data)
+	}
 	if stdout != "" {
 		fmt.Print(stdout)
 	}
