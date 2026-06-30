@@ -98,6 +98,8 @@ func main() {
 		runVerifyLoopCmd(absRoot, rest)
 	case "context":
 		runContextCmd(absRoot, rest)
+	case "session-suggest":
+		runSessionSuggestCmd(absRoot, rest)
 	case "serve":
 		runServeCmd(absRoot, rest)
 	case "secret":
@@ -189,6 +191,13 @@ Real commands:
   gate check <path>                       exit 0 if allowed, 2 if denied by a gate rule
   verify                                  check declared vs actual boundaries
   context                                 print the compiled store context (preamble) to stdout
+                                            --task "<prompt>"   task-slice the reference knowledge
+                                            --session <id>      session-aware delta (lean floor,
+                                                                then only new/changed each turn)
+                                            --reset             (PreCompact) mark floor lost; next
+                                                                turn re-sends protocol+law+slice
+  session-suggest --session <id>          (Stop) suggest committing a flagged @remember (exit 2)
+                                            if nothing was stored; silent otherwise
   run [--dry-run] <task>                  triage task → deterministic op or agent
                                             --dry-run: print decision, no execution
                                             policy: .projx/routing.json (optional)
