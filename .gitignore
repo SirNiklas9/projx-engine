@@ -7,6 +7,7 @@
 # per-project engine runtime state (store db, history, compiled context, jail shims)
 .projx/
 .runtime/
+*.ctl
 /data/
 /data-*/
 /dist/
