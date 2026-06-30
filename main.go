@@ -104,6 +104,8 @@ func main() {
 		runMapCmd(absRoot, rest)
 	case "route":
 		runRouteCmd(absRoot, rest)
+	case "init":
+		runInitCmd(absRoot, rest)
 	case "serve":
 		runServeCmd(absRoot, rest)
 	case "secret":
@@ -180,6 +182,9 @@ Usage:
   projx-engine [--root <dir>] <command> [args]
 
 Real commands:
+  init [stacks...] [--force]              ProjX-enable this project: install the Claude Code
+                                            connector (hooks + /projx:* slash commands), seed the
+                                            store, and index the code map. One command to turn it on.
   store get <id>                          get a record by id
   store list [--kind <name>] [--scope ..]  list records
   store commit --kind .. --key .. --body ..  write a record
