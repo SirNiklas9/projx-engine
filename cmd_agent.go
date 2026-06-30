@@ -28,18 +28,33 @@ import (
 func runAgentCmd(absRoot string, args []string) {
 	autoSeed(absRoot) // fresh project? seed floor + detected stack first
 
-	// ── Step 1: parse flags ───────────────────────────────────────────────────
-	var allowBins []string   // extra allowlisted exec basenames from --allow
-	var allowHosts []string  // extra allowlisted net hostnames from --allow-host
-	var passthroughArgs []string
+	// `agent run [...]` — strip the "run" subcommand word so it doesn't leak into the
+	// launched agent's argv (the only subcommand today; the dispatcher passes it through).
+	if len(args) > 0 && args[0] == "run" {
+		args = args[1:]
+	}
 
-	// Parse --allow and --allow-host flags; everything after "--" is passthrough.
+	// ── Step 1: parse flags ───────────────────────────────────────────────────
+	var allowBins []string  // extra allowlisted exec basenames from --allow
+	var allowHosts []string // extra allowlisted net hostnames from --allow-host
+	var passthroughArgs []string
+	var task string // --task: slices the ambient context to this task (else full dump)
+
+	// Parse flags; everything after "--" is passthrough.
 	i := 0
 	for i < len(args) {
 		switch args[i] {
 		case "--":
 			passthroughArgs = append(passthroughArgs, args[i+1:]...)
 			i = len(args)
+		case "--task":
+			i++
+			if i >= len(args) {
+				fmt.Fprintln(os.Stderr, "projx-engine: --task requires an argument")
+				os.Exit(1)
+			}
+			task = args[i]
+			i++
 		case "--allow":
 			i++
 			if i >= len(args) {
@@ -82,7 +97,17 @@ func runAgentCmd(absRoot string, args []string) {
 	// Capture the real PATH now, before we modify anything.
 	realPath := os.Getenv("PATH")
 
-	agentAbsPath := os.Getenv("PROJX_AGENT_CMD")
+	// PROJX_AGENT_CMD may be a full command line (e.g. the decider's tier choice
+	// "claude --model claude-opus-4-8"), not just a binary path — split it so the
+	// leading args (the model flag) reach the agent. A bare path stays a 1-element
+	// split (unchanged behavior).
+	var agentLeadingArgs []string
+	agentAbsPath := ""
+	if cmd := strings.TrimSpace(os.Getenv("PROJX_AGENT_CMD")); cmd != "" {
+		f := strings.Fields(cmd)
+		agentAbsPath = f[0]
+		agentLeadingArgs = f[1:]
+	}
 	if agentAbsPath == "" {
 		p, err := exec.LookPath("claude")
 		if err == nil {
@@ -104,8 +129,15 @@ func runAgentCmd(absRoot string, args []string) {
 	}
 
 	// ── Step 3: open the store, compile and write the ambient context ─────────
+	// With a --task, slice the contract to the task (law + only relevant records)
+	// instead of dumping the whole store (incl. the full code map) into the launch.
 	st := openStore(absRoot)
-	preamble := compileStorePreamble(st)
+	var preamble string
+	if strings.TrimSpace(task) != "" {
+		preamble = compileStorePreambleForTask(st, task)
+	} else {
+		preamble = compileStorePreamble(st)
+	}
 	st.Close()
 
 	ctxFile, ctxWriteErr := writeAgentContextText(absRoot, preamble)
@@ -247,7 +279,7 @@ func runAgentCmd(absRoot string, args []string) {
 		}
 
 		confinedEnv := append(env, "PROJX_JAIL_DIR="+jailDir)
-		agentArgv := append([]string{agentAbsPath}, passthroughArgs...)
+		agentArgv := append(append([]string{agentAbsPath}, agentLeadingArgs...), passthroughArgs...)
 		policy := confine.DefaultPolicy(absRoot, jailDir, filepath.Dir(agentAbsPath))
 
 		code, launchErr := c.LaunchConfined(policy, agentArgv, confinedEnv, absRoot)
@@ -259,7 +291,7 @@ func runAgentCmd(absRoot string, args []string) {
 	}
 
 	// Cooperative path — direct launch, no OS-FS confinement.
-	cmd := exec.Command(agentAbsPath, passthroughArgs...)
+	cmd := exec.Command(agentAbsPath, append(append([]string{}, agentLeadingArgs...), passthroughArgs...)...)
 	cmd.Env = env
 	cmd.Dir = absRoot
 	cmd.Stdin = os.Stdin

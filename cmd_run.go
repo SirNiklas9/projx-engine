@@ -107,9 +107,9 @@ func runRunCmd(absRoot string, args []string) {
 			}
 		}
 
-		// Pass the task as the agent's prompt via the "--" passthrough convention
-		// (see cmd_agent.go: everything after "--" is passthroughArgs).
-		runAgentCmd(absRoot, []string{"--", task})
+		// Pass the task twice: --task slices the ambient context to it, and the
+		// "--" passthrough hands it to the agent as the prompt (see cmd_agent.go).
+		runAgentCmd(absRoot, []string{"--task", task, "--", task})
 
 	default:
 		fmt.Fprintf(os.Stderr, "projx-engine run: internal error: unknown decision kind %q\n", d.Kind)
