@@ -102,6 +102,8 @@ func main() {
 		runSessionSuggestCmd(absRoot, rest)
 	case "map":
 		runMapCmd(absRoot, rest)
+	case "route":
+		runRouteCmd(absRoot, rest)
 	case "serve":
 		runServeCmd(absRoot, rest)
 	case "secret":
@@ -203,6 +205,10 @@ Real commands:
   map sync                                parse the project → index every symbol (signature +
                                             doc + file:line anchor) into the store as code-map records
   map list                                show the current code-map records
+  route <task>                            print the tier decision (class+source+cmd); no execution
+  route pin|floor <tier>                  set a standing pin (hard-lock) or floor (minimum) tier
+  route clear pin|floor                   remove a standing routing setting
+  route show                              show current pin / floor / keyword signals
   run [--dry-run] <task>                  triage task → deterministic op or agent
                                             --dry-run: print decision, no execution
                                             policy: .projx/routing.json (optional)

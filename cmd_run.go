@@ -45,8 +45,13 @@ func runRunCmd(absRoot string, args []string) {
 	task := strings.Join(rest, " ")
 
 	// ── Routing decision ─────────────────────────────────────────────────────
+	// The store-backed decider honors standing pin/floor + @-overrides + the
+	// project's own keyword signals. triage is nil for now (the cheap-model layer
+	// is seamed but not yet wired) so the ambiguous middle falls to the default tier.
 	cfg := routing.LoadConfig(absRoot)
-	d := routing.Decide(task, cfg)
+	st := openStore(absRoot)
+	d := routing.DecideWithStore(st, task, cfg, nil)
+	st.Close()
 
 	// ── Dry-run: print decision and return ───────────────────────────────────
 	if dryRun {
@@ -56,6 +61,9 @@ func runRunCmd(absRoot string, args []string) {
 			fmt.Printf("  op:     %s\n", d.Op)
 		} else {
 			fmt.Printf("  class:  %s\n", d.Class)
+			if d.Source != "" {
+				fmt.Printf("  source: %s\n", d.Source)
+			}
 			cmd := d.ProviderCmd
 			if cmd == "" {
 				cmd = "(use PROJX_AGENT_CMD or claude)"

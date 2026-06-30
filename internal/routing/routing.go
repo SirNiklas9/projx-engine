@@ -34,6 +34,9 @@ type Decision struct {
 	Class       string
 	ProviderCmd string
 	Reason      string
+	// Source is how the class was chosen (override | pin | keyword | triage |
+	// triage-escalated | default, +floor) — set for Kind=="agent" via the decider.
+	Source string
 }
 
 // Provider maps a capability-class name to a concrete agent command string.
@@ -120,13 +123,18 @@ func containsAny(s string, tokens ...string) bool {
 	return false
 }
 
-// Decide returns the routing Decision for a task string.
-//
-// Rules are intentionally small and obvious.  The heuristic is coarse; a
-// future version can use a real classifier.  Ambiguous tasks fall through to
-// the agent path — the cost of a mis-classified deterministic route (silently
-// not launching an agent) is worse than the cost of spending a token budget.
+// Decide is the store-free back-compat entry point: deterministic-op triage, then
+// the decider with no store (built-in classifier, no pin/floor) and no model triage.
 func Decide(task string, cfg Config) Decision {
+	return DecideWithStore(nil, task, cfg, nil)
+}
+
+// DecideWithStore returns the routing Decision for a task. It first does the
+// deterministic-OP triage (verify / store log / store list — handled with no agent at
+// all), and otherwise hands the capability-tier choice to the store-backed DECIDER
+// (store.RouteDecide): per-message @-override > standing pin/floor > keyword classifier
+// > cheap model triage > default. Pass triage=nil for deterministic-only routing.
+func DecideWithStore(s store.Store, task string, cfg Config, triage store.TriageFunc) Decision {
 	// ── 1. DETERMINISTIC-FIRST triage ────────────────────────────────────────
 	// Each arm maps a set of obvious keywords to an engine op.  Keywords are
 	// checked in priority order; first match wins.
@@ -158,33 +166,17 @@ func Decide(task string, cfg Config) Decision {
 		}
 	}
 
-	// ── 2. AGENT path: capability-class classification ────────────────────────
-	class := classifyCapability(task)
-	cmd := resolveProviderCmd(class, cfg)
-
+	// ── 2. AGENT path: the DECIDER (precedence ladder) picks the tier ─────────
+	rd := store.RouteDecide(s, task, triage)
+	cmd := rd.Cmd // store KRoute tier-map wins if set…
+	if cmd == "" {
+		cmd = resolveProviderCmd(rd.Class, cfg) // …else the routing.json provider.
+	}
 	return Decision{
 		Kind:        "agent",
-		Class:       class,
+		Class:       rd.Class,
 		ProviderCmd: cmd,
-		Reason:      capabilityReason(class),
-	}
-}
-
-// classifyCapability maps a task to a capability-class string. The classifier is
-// the SINGLE definition in projx-store (store.Classify), shared with the engine
-// cell — this delegates so there is one task->class policy, not two.
-func classifyCapability(task string) string {
-	return store.Classify(task)
-}
-
-// capabilityReason returns a short human explanation for a capability-class.
-func capabilityReason(class string) string {
-	switch class {
-	case "deep-reasoning":
-		return "task involves design/architecture/debugging — using deep-reasoning class"
-	case "cheap-fast":
-		return "task is a small mechanical change — using cheap-fast class"
-	default:
-		return "task does not match a specific class — using default class"
+		Reason:      rd.Reason,
+		Source:      rd.Source,
 	}
 }
