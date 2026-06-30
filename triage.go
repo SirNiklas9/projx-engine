@@ -180,44 +180,8 @@ func (c triageClient) Triage(task string) (string, bool) {
 	return parseTriageReply(out.Choices[0].Message.Content)
 }
 
-// parseTriageReply extracts a valid tier + confidence from the model's reply. It reads
-// the strict JSON shape but tolerates surrounding text and a bare tier word as fallback.
-// Returns ("", false) when no valid tier is present.
-func parseTriageReply(content string) (string, bool) {
-	content = strings.TrimSpace(content)
-	// Prefer the JSON object if present.
-	if i := strings.IndexByte(content, '{'); i >= 0 {
-		if j := strings.LastIndexByte(content, '}'); j > i {
-			var obj struct {
-				Tier      string `json:"tier"`
-				Confident *bool  `json:"confident"`
-			}
-			if json.Unmarshal([]byte(content[i:j+1]), &obj) == nil && validRouteTier(obj.Tier) {
-				confident := obj.Confident == nil || *obj.Confident // absent → treat as confident
-				return obj.Tier, confident
-			}
-		}
-	}
-	// Fallback: a bare tier word somewhere in the reply (confidence unknown → false so
-	// RouteDecide escalates rather than trusting a sloppy reply).
-	low := strings.ToLower(content)
-	for _, tier := range []string{"deep-reasoning", "cheap-fast", "default"} {
-		if strings.Contains(low, tier) {
-			return tier, false
-		}
-	}
-	return "", false
-}
-
-// validRouteTier reports whether s is one of the decider's capability classes.
-func validRouteTier(s string) bool {
-	switch s {
-	case "cheap-fast", "default", "deep-reasoning":
-		return true
-	default:
-		return false
-	}
-}
+// parseTriageReply delegates to the shared store parser (one definition for every face).
+func parseTriageReply(content string) (string, bool) { return store.ParseTierReply(content) }
 
 // firstNonEmpty returns the first non-empty, trimmed string.
 func firstNonEmpty(vals ...string) string {

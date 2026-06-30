@@ -119,27 +119,7 @@ func cliComplete(bin, model, prompt string) (string, bool) {
 	return string(out), true
 }
 
-// parseSelectedKeys extracts a JSON array from the reply and keeps only keys that are in
-// the candidate set (the model can't invent or rename a key). Order follows the reply.
+// parseSelectedKeys delegates to the shared store parser (one definition for every face).
 func parseSelectedKeys(reply string, candidates []string) []string {
-	valid := make(map[string]bool, len(candidates))
-	for _, k := range candidates {
-		valid[k] = true
-	}
-	i := strings.IndexByte(reply, '[')
-	j := strings.LastIndexByte(reply, ']')
-	if i < 0 || j <= i {
-		return nil
-	}
-	var arr []string
-	if json.Unmarshal([]byte(reply[i:j+1]), &arr) != nil {
-		return nil
-	}
-	var out []string
-	for _, k := range arr {
-		if k = strings.TrimSpace(k); valid[k] {
-			out = append(out, k)
-		}
-	}
-	return out
+	return store.ParseSelectedKeys(reply, candidates)
 }
