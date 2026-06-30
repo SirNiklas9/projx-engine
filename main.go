@@ -106,6 +106,8 @@ func main() {
 		runRouteCmd(absRoot, rest)
 	case "init":
 		runInitCmd(absRoot, rest)
+	case "hook":
+		runHookCmd(absRoot, rest)
 	case "serve":
 		runServeCmd(absRoot, rest)
 	case "secret":
@@ -185,6 +187,9 @@ Real commands:
   init [stacks...] [--force]              ProjX-enable this project: install the Claude Code
                                             connector (hooks + /projx:* slash commands), seed the
                                             store, and index the code map. One command to turn it on.
+  hook                                     Claude Code lifecycle handler — reads the hook JSON on
+                                            stdin and dispatches (SessionStart/UserPromptSubmit/
+                                            PreToolUse/PreCompact/Stop). Called by settings.json; no bash.
   store get <id>                          get a record by id
   store list [--kind <name>] [--scope ..]  list records
   store commit --kind .. --key .. --body ..  write a record
@@ -268,6 +273,10 @@ func enforceAgentContext(cmd string, rest []string) {
 		}
 	case "verify":
 		// Read-only check — allowed.
+	case "hook":
+		// The Claude Code lifecycle bridge. It is the trusted harness integration
+		// (not one of the agent's own tools) and self-unsets PROJX_AGENT_CONTEXT, so
+		// it must pass even when a caged agent inherited the restricted mode.
 	default:
 		// gate, secret, agent, run, and anything else.
 		deny(cmd)

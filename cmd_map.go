@@ -58,48 +58,52 @@ func runMapCmd(absRoot string, args []string) {
 	}
 }
 
-// runMapSync re-parses the project and upserts one declared-structure record per
-// symbol, pruning map records whose symbol no longer exists. Idempotent.
+// runMapSync is the CLI face: it runs syncMap and prints a summary.
 func runMapSync(absRoot string) {
-	digests, skipped, err := core.DigestDir(absRoot)
+	written, pruned, skipped, err := syncMap(absRoot)
 	if err != nil {
-		die("map sync: parse: %v", err)
-	}
-	st := openStore(absRoot)
-	defer st.Close()
-
-	// Build the desired record set.
-	want := make(map[string]store.Record, len(digests))
-	for _, d := range digests {
-		r := mapRecordFor(d)
-		want[r.ID] = r
-	}
-
-	// Prune stale map records (same Origin, no longer wanted).
-	pruned := 0
-	for _, ex := range st.List(store.OfKind(store.KDeclaredStructure)) {
-		if ex.Origin == mapRecordOrigin {
-			if _, keep := want[ex.ID]; !keep {
-				if err := st.Delete(ex.ID); err == nil {
-					pruned++
-				}
-			}
-		}
-	}
-
-	// Upsert the desired set.
-	written := 0
-	for _, r := range want {
-		if err := st.Put(r); err != nil {
-			die("map sync: put %s: %v", r.ID, err)
-		}
-		written++
+		die("map sync: %v", err)
 	}
 	fmt.Printf("map sync: %d symbol(s) indexed, %d pruned", written, pruned)
 	if len(skipped) > 0 {
 		fmt.Printf(", %d file(s) skipped", len(skipped))
 	}
 	fmt.Println()
+}
+
+// syncMap re-parses the project and upserts one declared-structure record per symbol,
+// pruning map records whose symbol no longer exists. Idempotent and print-free (shared
+// by the CLI and the SessionStart hook, where stdout must stay clean).
+func syncMap(absRoot string) (written, pruned int, skipped []string, err error) {
+	digests, skipped, err := core.DigestDir(absRoot)
+	if err != nil {
+		return 0, 0, skipped, err
+	}
+	st := openStore(absRoot)
+	defer st.Close()
+
+	want := make(map[string]store.Record, len(digests))
+	for _, d := range digests {
+		r := mapRecordFor(d)
+		want[r.ID] = r
+	}
+
+	for _, ex := range st.List(store.OfKind(store.KDeclaredStructure)) {
+		if ex.Origin == mapRecordOrigin {
+			if _, keep := want[ex.ID]; !keep {
+				if delErr := st.Delete(ex.ID); delErr == nil {
+					pruned++
+				}
+			}
+		}
+	}
+	for _, r := range want {
+		if putErr := st.Put(r); putErr != nil {
+			return written, pruned, skipped, fmt.Errorf("put %s: %w", r.ID, putErr)
+		}
+		written++
+	}
+	return written, pruned, skipped, nil
 }
 
 // runMapList prints the current code-map records (id + key + anchor).
