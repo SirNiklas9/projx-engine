@@ -11,7 +11,7 @@ wasm    = "cell.wasm"
 # pulp.Confine.RunCaged and the host performs the Landlock/AppContainer (+ Linux
 # netns/gVisor egress) launch. spawn.process is the uncaged opt-out launch path.
 # No cage deps compile into the wasm — the hands are host-side.
-capabilities = ["transport.http.inbound", "storage.fs", "storage.sqlite", "spawn.confine", "spawn.process", "spawn.pty", "entropy.read"]
+capabilities = ["transport.http.inbound", "transport.http.outbound", "storage.fs", "storage.sqlite", "spawn.confine", "spawn.process", "spawn.pty", "entropy.read"]
 
 # A caged one-shot agent run blocks the step until the agent exits; give it room.
 # (Async job submission is a later brick.)

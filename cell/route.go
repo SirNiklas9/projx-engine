@@ -20,6 +20,6 @@ func handleRoute(c *pulpgin.Context) {
 		c.JSON(503, pulpgin.H{"error": "store unavailable: " + err.Error()})
 		return
 	}
-	d := store.RouteDecide(s, task, nil)
+	d := store.RouteDecide(s, task, cellTriageFunc())
 	c.JSON(200, pulpgin.H{"task": task, "class": d.Class, "cmd": d.Cmd, "source": d.Source, "reason": d.Reason})
 }

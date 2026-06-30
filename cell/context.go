@@ -103,7 +103,7 @@ func handleContextDelta(c *pulpgin.Context) {
 	}
 	session := c.Query("session")
 	task := c.Query("task")
-	c.JSON(200, pulpgin.H{"context": store.SessionContext(s, pulpCheckpoints{}, session, task, false, nil)})
+	c.JSON(200, pulpgin.H{"context": store.SessionContext(s, pulpCheckpoints{}, session, task, false, cellSelectorFunc())})
 }
 
 // handleContextReset — PreCompact. Mark the floor lost so the next turn refills.

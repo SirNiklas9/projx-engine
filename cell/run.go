@@ -62,7 +62,7 @@ func handleAgentRun(c *pulpgin.Context) {
 	// Assemble the contract from the store — the same pieces /api/agent/spec
 	// returns, now delivered + executed. RouteDecide = the decider (pin/floor/
 	// @-override/keyword); triage nil in-cell (no outbound-HTTP capability yet).
-	d := store.RouteDecide(s, req.Task, nil)
+	d := store.RouteDecide(s, req.Task, cellTriageFunc())
 	class, cmd := d.Class, d.Cmd
 	preamble := store.AgentContextForTask(s, req.Task) // task-sliced: law + only task-relevant records
 	deny := store.DenyRules(s)

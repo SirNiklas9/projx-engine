@@ -35,7 +35,7 @@ func handleAgentSpec(c *pulpgin.Context) {
 		c.JSON(503, pulpgin.H{"error": "store unavailable: " + err.Error()})
 		return
 	}
-	d := store.RouteDecide(s, task, nil) // the decider (pin/floor/@-override/keyword); triage nil in-cell
+	d := store.RouteDecide(s, task, cellTriageFunc()) // the decider (pin/floor/@-override/keyword); triage nil in-cell
 	c.JSON(200, pulpgin.H{
 		"task":     task,
 		"class":    d.Class,
