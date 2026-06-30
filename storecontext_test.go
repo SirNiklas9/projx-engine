@@ -103,89 +103,10 @@ func TestCompileStorePreambleTiered(t *testing.T) {
 	}
 }
 
-// TestOneLineSummary covers the helper's multi-line truncation and edge cases.
-func TestOneLineSummary(t *testing.T) {
-	cases := []struct {
-		name  string
-		input string
-		// wantPrefix: the output must start with this
-		wantPrefix string
-		// wantMaxRunes: output rune count must be <= this
-		wantMaxRunes int
-		// wantSuffix: if non-empty, output must end with this
-		wantSuffix string
-		// wantExact: if non-empty, output must equal this
-		wantExact string
-	}{
-		{
-			name:         "empty body",
-			input:        "",
-			wantExact:    "(no summary)",
-			wantMaxRunes: 12,
-		},
-		{
-			name:         "single short line",
-			input:        "hello world",
-			wantExact:    "hello world",
-			wantMaxRunes: 11,
-		},
-		{
-			name:  "multi-line picks first",
-			input: "first line\nsecond line\nthird",
-			wantPrefix:   "first line",
-			wantMaxRunes: 121,
-		},
-		{
-			name:         "long line truncated",
-			input:        strings.Repeat("a", 200),
-			wantMaxRunes: 121, // 120 runes + "…"
-			wantSuffix:   "…",
-		},
-		{
-			name:         "exactly 120 runes — no ellipsis",
-			input:        strings.Repeat("b", 120),
-			wantMaxRunes: 120,
-			wantExact:    strings.Repeat("b", 120),
-		},
-		{
-			name:         "121 runes — truncated",
-			input:        strings.Repeat("c", 121),
-			wantMaxRunes: 121,
-			wantSuffix:   "…",
-		},
-		{
-			name:         "internal whitespace collapsed",
-			input:        "hello   world\nnext",
-			wantExact:    "hello world",
-			wantMaxRunes: 11,
-		},
-		{
-			name:         "blank lines before content",
-			input:        "\n\n   \nactual content\nignored",
-			wantExact:    "actual content",
-			wantMaxRunes: 14,
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := oneLineSummary(tc.input)
-			rc := len([]rune(got))
-			if rc > tc.wantMaxRunes {
-				t.Errorf("rune count %d > %d: %q", rc, tc.wantMaxRunes, got)
-			}
-			if tc.wantExact != "" && got != tc.wantExact {
-				t.Errorf("got %q, want %q", got, tc.wantExact)
-			}
-			if tc.wantPrefix != "" && !strings.HasPrefix(got, tc.wantPrefix) {
-				t.Errorf("got %q, want prefix %q", got, tc.wantPrefix)
-			}
-			if tc.wantSuffix != "" && !strings.HasSuffix(got, tc.wantSuffix) {
-				t.Errorf("got %q, want suffix %q", got, tc.wantSuffix)
-			}
-		})
-	}
-}
+// Note: the one-line-summary helper and the protocol text moved into the shared
+// projx-store library; their unit tests live in projx-store/preamble_test.go.
+// compileStorePreamble is now a thin alias over store.AgentPreamble, exercised by
+// the preamble tests below.
 
 // TestFullSectionSizeCap verifies that a KConvention with a >1500-byte Body is
 // demoted to an index line even though conventions are a "full" section.
@@ -233,17 +154,6 @@ func TestFullSectionSizeCap(t *testing.T) {
 	// Oversized convention index line must mention the size-cap note.
 	if !strings.Contains(preamble, "store get") {
 		t.Error("'store get' reference missing from oversized convention index line")
-	}
-}
-
-// TestProtocolTextMentionsIndex verifies that the protocol rule 2 mentions
-// the index pattern so the agent knows to fetch full content on demand.
-func TestProtocolTextMentionsIndex(t *testing.T) {
-	if !strings.Contains(storeProtocolText, "INDEX") {
-		t.Error("storeProtocolText rule 2 does not mention INDEX — agent may not know to fetch full records")
-	}
-	if !strings.Contains(storeProtocolText, "store get") {
-		t.Error("storeProtocolText does not mention 'store get' — on-demand fetch instruction missing")
 	}
 }
 
