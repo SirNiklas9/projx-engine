@@ -118,10 +118,17 @@ func resolveAgentArgv(absRoot, task string, opts renderOpts) (string, []string) 
 // prepareAgentContext compiles the store preamble, writes .projx/agent-context.md,
 // and returns the context file + the env that delivers it. This is "the rest of
 // the engine work for the AI": even UNCAGED, the agent gets the steering/contract
-// + gates-as-context + model — not a bare CLI.
-func prepareAgentContext(absRoot string) (ctxFile string, env map[string]string) {
+// + gates-as-context + model — not a bare CLI. When task is non-empty the preamble
+// is TASK-SLICED (law + only the records relevant to the task) instead of the full
+// store dump, so a launch costs the least, most-relevant context.
+func prepareAgentContext(absRoot, task string) (ctxFile string, env map[string]string) {
 	st := openStore(absRoot)
-	preamble := compileStorePreamble(st)
+	var preamble string
+	if strings.TrimSpace(task) != "" {
+		preamble = compileStorePreambleForTask(st, task)
+	} else {
+		preamble = compileStorePreamble(st)
+	}
 	st.Close()
 	ctxFile, _ = writeAgentContextText(absRoot, preamble)
 	env = map[string]string{
@@ -139,7 +146,7 @@ func prepareAgentContext(absRoot string) (ctxFile string, env map[string]string)
 // path (uncaged headless, caged spec, serve) uses it, so the engine's work is
 // applied uniformly — cage or no cage.
 func agentLaunch(absRoot, task string) (name string, argv []string, env map[string]string) {
-	ctxFile, env := prepareAgentContext(absRoot)
+	ctxFile, env := prepareAgentContext(absRoot, task)
 	name, argv = resolveAgentArgv(absRoot, task, renderOpts{
 		Model:            os.Getenv("PROJX_AGENT_MODEL"),
 		SystemPromptFile: ctxFile,

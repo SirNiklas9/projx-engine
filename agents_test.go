@@ -26,7 +26,7 @@ func TestPrepareAgentContext(t *testing.T) {
 	}
 	st.Close()
 
-	ctxFile, env := prepareAgentContext(root)
+	ctxFile, env := prepareAgentContext(root, "") // no task → full preamble
 	if ctxFile == "" {
 		t.Fatal("no context file produced")
 	}
