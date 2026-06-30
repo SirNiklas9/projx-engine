@@ -46,11 +46,12 @@ func runRunCmd(absRoot string, args []string) {
 
 	// ── Routing decision ─────────────────────────────────────────────────────
 	// The store-backed decider honors standing pin/floor + @-overrides + the
-	// project's own keyword signals. triage is nil for now (the cheap-model layer
-	// is seamed but not yet wired) so the ambiguous middle falls to the default tier.
+	// project's own keyword signals, and consults the cheap haiku triage for the
+	// ambiguous middle (newTriageFunc is nil when no triage endpoint is configured,
+	// keeping routing fully deterministic offline).
 	cfg := routing.LoadConfig(absRoot)
 	st := openStore(absRoot)
-	d := routing.DecideWithStore(st, task, cfg, nil)
+	d := routing.DecideWithStore(st, task, cfg, newTriageFunc())
 	st.Close()
 
 	// ── Dry-run: print decision and return ───────────────────────────────────

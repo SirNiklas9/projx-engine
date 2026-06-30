@@ -7,6 +7,23 @@ import (
 	store "github.com/SirNiklas9/projx-store"
 )
 
+// TestDecideWithStoreUsesTriage proves the engine forwards a triage func to the
+// decider: an ambiguous task triggers the (here fake) triage and adopts its tier.
+func TestDecideWithStoreUsesTriage(t *testing.T) {
+	root := t.TempDir()
+	st := openStore(root)
+	defer st.Close()
+	called := false
+	d := routing.DecideWithStore(st, "handle the widget thing", routing.DefaultConfig(),
+		func(string) (string, bool) { called = true; return "deep-reasoning", true })
+	if !called {
+		t.Error("triage not called for an ambiguous task")
+	}
+	if d.Class != "deep-reasoning" || d.Source != "triage" {
+		t.Errorf("decision = %s/%s, want deep-reasoning/triage", d.Class, d.Source)
+	}
+}
+
 // TestCanonTier covers the friendly alias resolution.
 func TestCanonTier(t *testing.T) {
 	cases := map[string]string{
