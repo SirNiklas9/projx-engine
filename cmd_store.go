@@ -58,7 +58,8 @@ func openStore(absRoot string) *projectStore {
 	if err != nil {
 		die("open project store: %v", err)
 	}
-	yoursPath := filepath.Join(projDir, "yours.db") // fallback when no per-user dir
+	fallbackYours := filepath.Join(projDir, "yours.db") // project-local fallback
+	yoursPath := fallbackYours
 	if yd := yoursDir(); yd != "" {
 		if err := os.MkdirAll(yd, 0o755); err == nil {
 			yoursPath = filepath.Join(yd, "store.db")
@@ -66,7 +67,19 @@ func openStore(absRoot string) *projectStore {
 	}
 	yours, err := store.Open(yoursPath)
 	if err != nil {
-		die("open yours store: %v", err)
+		// The per-user YOURS store can be unreachable from inside a confined
+		// agent run: Landlock (Linux) / AppContainer (Windows) scope the agent
+		// to the project root, which excludes <UserConfigDir>/projx, so opening
+		// it fails with SQLITE_CANTOPEN. Fall back to a project-local yours store
+		// (inside the cage) so project-scope commits still persist. The agent's
+		// knowledge is project knowledge anyway; global/workspace records are the
+		// human's and are not the caged agent's to write.
+		if yoursPath != fallbackYours {
+			yours, err = store.Open(fallbackYours)
+		}
+		if err != nil {
+			die("open yours store: %v", err)
+		}
 	}
 	return &projectStore{Workspace: store.NewWorkspace(yours, project), project: project, yours: yours}
 }
