@@ -5,13 +5,20 @@ engine** into Claude Code via lifecycle hooks. It calls the engine's **CLI**
 (no server to keep running) so the engine stays unchanged; a different harness
 (Neovim, JetBrains) would get its own thin connector calling the same commands.
 
-It wires three hooks:
+It wires five hooks:
 
 | Hook | Calls | Effect |
 |---|---|---|
-| `SessionStart` | `projx-engine --root "$CLAUDE_PROJECT_DIR" context` | injects the project's store context at session start |
-| `UserPromptSubmit` | same | re-injects the context each turn (full context; task-slicing is deferred) |
-| `PreToolUse` (Read\|Edit\|Write) | `projx-engine --root "$CLAUDE_PROJECT_DIR" gate check <path>` | blocks a tool call whose target path is off-limits (exit 2) |
+| `SessionStart` | `projx-engine context --session <id>` | injects the **lean floor** (protocol + law) and starts a fresh session checkpoint |
+| `UserPromptSubmit` | `projx-engine context --session <id> --task "<prompt>"` | re-asserts the law + injects only the **new/changed** store records relevant to the prompt (task-sliced **delta**) |
+| `PreToolUse` (Read\|Edit\|Write) | `projx-engine gate check <path>` | blocks a tool call whose target path is off-limits (exit 2) |
+| `PreCompact` | `projx-engine context --session <id> --reset` | marks the floor lost so the next turn re-sends protocol+law+slice after compaction |
+| `Stop` | `projx-engine session-suggest --session <id>` | **suggest-only**: if the user said `@remember` but nothing was committed, nudges once (exit 2); silent otherwise |
+
+The session checkpoint lives at `<root>/.projx/agent-seen-<session>.json` (gitignored
+under `.projx`). It records which records have been injected (id → `UpdatedAt`) so each
+turn sends the **least** new context: the small binding law re-asserts every turn, while
+docs/ADRs/history load per-task and only once unless they change.
 
 The injected context is wrapped in a declarative `<project-context>` frame so
 Claude Code treats it as project reference **facts**, not as injected
@@ -53,8 +60,10 @@ if you don't want to commit them). Then start Claude Code in the project.
   warning to stderr so the lost enforcement is noticed, not silent. The gate is
   one cooperative layer; OS-FS confinement (Landlock on Linux) is the real wall.
 - **`PROJX_ENGINE_BIN`** overrides the engine path if it isn't on `PATH`.
-- **Token cost:** `UserPromptSubmit` injects the full context every turn (v1).
-  Task-sliced context is deferred until it justifies the cost.
+- **Token cost:** `UserPromptSubmit` sends a task-sliced **delta** — the binding law
+  plus only the records that are new or changed for that prompt. Unchanged records
+  already in context are not re-sent; the full reference set never dumps. (`jq` is used
+  to read the prompt from the hook JSON; without it the hook degrades to the lean floor.)
 - **Platform:** targets Linux (bash + the engine's Landlock tier). On Windows the
   scripts need Git Bash; matching is separator-normalized so paths still work.
 - **Matcher** is `Read|Edit|Write`. Add `MultiEdit|NotebookEdit` to the matcher
