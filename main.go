@@ -100,6 +100,8 @@ func main() {
 		runContextCmd(absRoot, rest)
 	case "session-suggest":
 		runSessionSuggestCmd(absRoot, rest)
+	case "map":
+		runMapCmd(absRoot, rest)
 	case "serve":
 		runServeCmd(absRoot, rest)
 	case "secret":
@@ -198,6 +200,9 @@ Real commands:
                                                                 turn re-sends protocol+law+slice
   session-suggest --session <id>          (Stop) suggest committing a flagged @remember (exit 2)
                                             if nothing was stored; silent otherwise
+  map sync                                parse the project → index every symbol (signature +
+                                            doc + file:line anchor) into the store as code-map records
+  map list                                show the current code-map records
   run [--dry-run] <task>                  triage task → deterministic op or agent
                                             --dry-run: print decision, no execution
                                             policy: .projx/routing.json (optional)
