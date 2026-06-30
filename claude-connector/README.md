@@ -5,10 +5,11 @@ engine** into Claude Code via lifecycle hooks. It calls the engine's **CLI**
 (no server to keep running) so the engine stays unchanged; a different harness
 (Neovim, JetBrains) would get its own thin connector calling the same commands.
 
-It wires five hooks:
+It wires six hooks across five events:
 
 | Hook | Calls | Effect |
 |---|---|---|
+| `SessionStart` | `projx-engine map sync` | re-indexes the code map (symbol signature + `file:line` anchor) so injected anchors are current; silent (writes the store only) |
 | `SessionStart` | `projx-engine context --session <id>` | injects the **lean floor** (protocol + law) and starts a fresh session checkpoint |
 | `UserPromptSubmit` | `projx-engine context --session <id> --task "<prompt>"` | re-asserts the law + injects only the **new/changed** store records relevant to the prompt (task-sliced **delta**) |
 | `PreToolUse` (Read\|Edit\|Write) | `projx-engine gate check <path>` | blocks a tool call whose target path is off-limits (exit 2) |
@@ -34,9 +35,20 @@ instructions (avoids the prompt-injection false-positive on hook context).
    Seed the floor: `projx-engine --root . store seed` (or it auto-seeds on the
    first `agent run`). Confirm: `projx-engine --root . store list`.
 
+It also installs namespaced **`/projx:*` slash commands** (`.claude/commands/projx/`):
+`/projx:remember <fact>` (save to the store), `/projx:store` (show it), `/projx:route
+<task>` (see the tier decision), `/projx:gate` (list/check off-limits paths). They shell
+out to the engine — low-token store entry without launching the workbench.
+
 ## Install
 
-From your target project's root:
+The one-command on-ramp (installs everything below, seeds the store, indexes the map):
+
+```sh
+projx-engine --root . init        # add stacks explicitly: init go node ; reinstall: init --force
+```
+
+Or wire it by hand from your target project's root:
 
 ```sh
 # merge the connector's .claude/ into your project's .claude/

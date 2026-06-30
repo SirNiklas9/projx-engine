@@ -5,6 +5,11 @@
         "hooks": [
           {
             "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/projx-map.sh\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
             "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/projx-context.sh\"",
             "timeout": 15
           }
