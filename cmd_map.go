@@ -40,6 +40,9 @@ type mapAnchorBody struct {
 	Signature string `json:"signature"`
 	Kind      string `json:"kind"`
 	Doc       string `json:"doc,omitempty"`
+	// Terms are distinctive body words (calls + string literals) so a concept buried in
+	// a differently-named function is still matched — deterministic Level-1 auto-seed.
+	Terms string `json:"terms,omitempty"`
 }
 
 // runMapCmd dispatches `map <sync|list>`.
@@ -185,6 +188,7 @@ func mapRecordFor(d core.SymbolDigest, repo string) store.Record {
 		Signature: d.Signature,
 		Doc:       d.Doc,
 		Anchor:    anchor,
+		Terms:     d.Terms,
 	})
 	return store.Record{
 		ID:     id,
