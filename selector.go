@@ -28,12 +28,20 @@ import (
 
 const selectorInstruction = `You select which knowledge areas are relevant to a coding task. You are given a list of KEYS (slash-separated knowledge paths) and a TASK. Reply with ONLY a compact JSON array of the keys — copied EXACTLY from the list — that are relevant to the task. Use [] if none are relevant. No prose, no new keys.`
 
-// newSelectorFunc returns a v2 semantic selector, or nil when smart context is not opted
-// into or no cheap model is available (→ the store falls back to deterministic v1).
+// newSelectorFunc returns the FORCED v2 selector — non-nil only when PROJX_SMART_CONTEXT
+// is set AND a cheap model is available (a model call on every message). For the common
+// case use contextSelector, which auto-escalates only when the deterministic slice is
+// ambiguous.
 func newSelectorFunc() store.SelectorFunc {
 	if strings.TrimSpace(os.Getenv("PROJX_SMART_CONTEXT")) == "" {
-		return nil // opt-in: a model call per message is off by default
+		return nil // not forced
 	}
+	return rawSelectorFunc()
+}
+
+// rawSelectorFunc is the model-backed semantic selector with no opt-in gate — nil only
+// when no cheap model is configured.
+func rawSelectorFunc() store.SelectorFunc {
 	if !cheapModelAvailable() {
 		return nil
 	}
@@ -48,6 +56,24 @@ func newSelectorFunc() store.SelectorFunc {
 		}
 		return parseSelectedKeys(reply, keys)
 	}
+}
+
+// contextSelector decides which slicing to use for a task, cheapest-first:
+//   - PROJX_SMART_CONTEXT set → force the semantic selector (v2) always;
+//   - otherwise, a cheap model is available AND the deterministic v1 slice would OVERFLOW
+//     (ambiguous keywords) → auto-escalate to v2 for THIS task only;
+//   - otherwise nil → free deterministic v1.
+//
+// This spends a model call only where keyword matching is too broad — the routing
+// philosophy applied to context.
+func contextSelector(st store.Store, task string) store.SelectorFunc {
+	if s := newSelectorFunc(); s != nil {
+		return s // forced
+	}
+	if store.TaskSliceOverflows(st, task) {
+		return rawSelectorFunc() // auto-escalate: v1 was ambiguous
+	}
+	return nil
 }
 
 // cheapModelAvailable reports whether some cheap-model path (HTTP key or agent CLI) exists.

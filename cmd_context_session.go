@@ -84,7 +84,7 @@ func runSessionContext(absRoot, session, task string, reset bool) {
 func buildSessionContext(absRoot, session, task string, reset bool) string {
 	st := openStore(absRoot)
 	defer st.Close()
-	return store.SessionContext(st, osCheckpoints{absRoot}, session, task, reset, newSelectorFunc())
+	return store.SessionContext(st, osCheckpoints{absRoot}, session, task, reset, contextSelector(st, task))
 }
 
 // runSessionSuggestCmd is the CLI face of the Stop suggestion (`session-suggest`).
