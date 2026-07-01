@@ -118,6 +118,8 @@ func main() {
 		runAgentCmd(absRoot, rest)
 	case "run":
 		runRunCmd(absRoot, rest)
+	case "dispatch":
+		runDispatchCmd(absRoot, rest)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command %q\n\n", cmd)
 		usage()
@@ -223,6 +225,8 @@ Real commands:
   route show                              show current pin / floor / keyword signals
   run [--dry-run] <task>                  triage task → deterministic op or agent
                                             --dry-run: print decision, no execution
+  dispatch [--run] <message>              decompose a multi-task message; route each task
+                                            to its own tier (plan-only; --run fans out)
                                             policy: .projx/routing.json (optional)
   secret set <CODENAME>                   seal a secret (reads value from stdin)
   secret ls                               list sealed secret codenames (no values)
