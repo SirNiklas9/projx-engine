@@ -186,6 +186,16 @@ func (s *controlServer) routes() *http.ServeMux {
 	mux.HandleFunc("GET /api/profile", s.handleProfile)
 	mux.HandleFunc("POST /api/agent/run", s.handleAgentRun)
 	mux.HandleFunc("GET /api/agent/runs", s.handleAgentRuns)
+	// Parity with the engine cell — routing, gate, dispatcher-mode, context slicing,
+	// agent spec — so `serve` is the ONE full control plane the Workbench relays to.
+	mux.HandleFunc("GET /api/route", s.handleRoute)
+	mux.HandleFunc("GET /api/gate", s.handleGate)
+	mux.HandleFunc("GET /api/gate/check", s.handleGateCheck)
+	mux.HandleFunc("GET /api/gate/dispatcher", s.handleGateDispatcher)
+	mux.HandleFunc("GET /api/context/floor", s.handleContextFloor)
+	mux.HandleFunc("GET /api/context/slice", s.handleContextSlice)
+	mux.HandleFunc("GET /api/context/delta", s.handleContextDelta)
+	mux.HandleFunc("GET /api/agent/spec", s.handleAgentSpec)
 	return mux
 }
 
