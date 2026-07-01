@@ -10,7 +10,41 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 )
+
+// workspaceRepoNames returns the basenames of the declared member repos (the focus set).
+func workspaceRepoNames(absRoot string) map[string]bool {
+	names := map[string]bool{}
+	for _, r := range loadWorkspaceSrcs(absRoot) {
+		names[filepath.Base(r)] = true
+	}
+	return names
+}
+
+// repoOfPath returns the member repo a tool's file_path belongs to (its first path
+// segment relative to the workspace root), or "" if it isn't under a declared repo. This
+// is what lets the session's FOCUS auto-track the repo you're editing.
+func repoOfPath(absRoot, p string) string {
+	p = filepath.ToSlash(strings.TrimSpace(p))
+	if p == "" {
+		return ""
+	}
+	if filepath.IsAbs(p) {
+		if rel, err := filepath.Rel(absRoot, p); err == nil {
+			p = filepath.ToSlash(rel)
+		}
+	}
+	p = strings.TrimPrefix(p, "./")
+	seg := p
+	if i := strings.IndexByte(p, '/'); i > 0 {
+		seg = p[:i]
+	}
+	if workspaceRepoNames(absRoot)[seg] {
+		return seg
+	}
+	return ""
+}
 
 // workspaceFile is where a workspace records its member repo source dirs.
 func workspaceFile(absRoot string) string {

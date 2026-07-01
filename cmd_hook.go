@@ -118,6 +118,15 @@ func handleHook(absRoot string, input []byte) (stdout, stderr string, code int) 
 		if denied {
 			return "", fmt.Sprintf("ProjX gate: %q is off-limits by gate rule %q.", path, pat), 2
 		}
+		// Auto-focus: touching a member repo's file focuses the session there, so the
+		// next turn's slice leads with that repo — and it SHIFTS when you edit another.
+		if repo := repoOfPath(absRoot, path); repo != "" {
+			cps := osCheckpoints{absRoot}
+			if cp := cps.Load(sid); cp.Focus != repo {
+				cp.Focus = repo
+				cps.Save(sid, cp)
+			}
+		}
 		return "", "", 0
 
 	case "PreCompact":

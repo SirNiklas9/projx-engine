@@ -42,7 +42,7 @@ func compileStorePreamble(st store.Store) string {
 // the deterministic v1 token slice with zero model calls; when opted in it selects the
 // relevant records semantically via the cheap model.)
 func compileStorePreambleForTask(st store.Store, task string) string {
-	return store.AgentContextForTaskSel(st, task, contextSelector(st, task))
+	return store.AgentContextForTaskSel(st, task, contextSelector(st, task), os.Getenv("PROJX_FOCUS"))
 }
 
 // writeAgentContextText writes an already-compiled preamble to disk at
