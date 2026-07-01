@@ -93,12 +93,17 @@ func cellTriageFunc() store.TriageFunc {
 	}
 }
 
-// cellSelectorFunc is the v2 semantic context selector for the cell — OPT-IN via
-// PROJX_SMART_CONTEXT and only with an AI key (else nil → deterministic v1).
+// cellSelectorFunc is the FORCED v2 selector (PROJX_SMART_CONTEXT set + an AI key).
 func cellSelectorFunc() store.SelectorFunc {
 	if strings.TrimSpace(os.Getenv("PROJX_SMART_CONTEXT")) == "" {
 		return nil
 	}
+	return rawCellSelector()
+}
+
+// rawCellSelector is the model-backed semantic selector with no opt-in gate (nil when no
+// AI key is configured).
+func rawCellSelector() store.SelectorFunc {
 	if _, _, _, ok := cellAIConfig(); !ok {
 		return nil
 	}
@@ -112,6 +117,18 @@ func cellSelectorFunc() store.SelectorFunc {
 		}
 		return store.ParseSelectedKeys(reply, keys)
 	}
+}
+
+// cellContextSelector mirrors the native contextSelector: force v2 if PROJX_SMART_CONTEXT
+// is set, else auto-escalate to v2 only when the deterministic v1 slice would overflow.
+func cellContextSelector(s store.Store, task string) store.SelectorFunc {
+	if sel := cellSelectorFunc(); sel != nil {
+		return sel
+	}
+	if store.TaskSliceOverflows(s, task) {
+		return rawCellSelector()
+	}
+	return nil
 }
 
 func firstNonEmptyCell(vals ...string) string {
