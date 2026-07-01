@@ -18,8 +18,11 @@ what that repo needs.
 ## Run it
 
 ```sh
-# build the CLI once
-cd projx-engine && GOWORK=off go build -o ~/.local/bin/projx-engine .
+# install the CLI once — builds it AND puts it on PATH.
+#   Windows:      .\install.ps1     (from the projx-engine repo — produces projx-engine.EXE)
+#   macOS/Linux:  ./install.sh
+# (by hand: `go build -o ~/.local/bin/projx-engine .` — you MUST add .exe on Windows
+#  or PowerShell/cmd won't recognize it.)
 
 # per project (drag-and-drop): installs the connector, seeds the floor, indexes the code
 cd /path/to/repo && projx-engine init
