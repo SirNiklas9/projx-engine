@@ -8,6 +8,7 @@ require (
 	github.com/BananaLabs-OSS/Pulp-ext-egress v0.0.0
 	github.com/BananaLabs-OSS/Pulp-ext-fuse v0.0.0
 	github.com/BananaLabs-OSS/Pulp-grants v0.0.0
+	github.com/BurntSushi/toml v1.6.0
 	github.com/SirNiklas9/projx-core v0.0.0
 	github.com/SirNiklas9/projx-store v0.0.0
 	github.com/SirNiklas9/projx-verify v0.0.0

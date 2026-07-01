@@ -106,6 +106,8 @@ func main() {
 		runRouteCmd(absRoot, rest)
 	case "init":
 		runInitCmd(absRoot, rest)
+	case "seed":
+		runSeedCmd(absRoot, rest)
 	case "hook":
 		runHookCmd(absRoot, rest)
 	case "serve":

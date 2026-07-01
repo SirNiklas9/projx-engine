@@ -77,6 +77,12 @@ func runInitCmd(absRoot string, args []string) {
 	}
 	st.Close()
 
+	// 2b. Bake a declared seed file if the project ships one (projx.seed.toml /
+	// .projx/seed.toml) — so cloning a repo + `init` reproduces its whole rule-set.
+	if p := seedPathArg(absRoot, nil); fileExists(p) {
+		applySeedFile(absRoot, p)
+	}
+
 	// 3. Index the code map.
 	runMapSync(absRoot, nil)
 
