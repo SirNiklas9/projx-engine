@@ -184,6 +184,7 @@ func TestSecretInjectedUnderConfinement(t *testing.T) {
 		"PROJX_SECRETS_DIR="+secretsDir,
 		"PROJX_OUTSIDE_PATH="+outsidePath,
 		"PROJX_RESULT_PATH="+resultPath,
+		"PROJX_CAGE=1", // asserts CONFINED behavior; cage is opt-in now
 	)
 
 	var outBuf, errBuf strings.Builder

@@ -25,6 +25,16 @@ import (
 	"github.com/SirNiklas9/projx-engine/internal/secrets"
 )
 
+// cageRequested reports whether the caller explicitly opted into OS-level
+// confinement (PROJX_CAGE truthy). Cage is opt-in, never required — default uncaged.
+func cageRequested() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("PROJX_CAGE"))) {
+	case "1", "on", "true", "yes":
+		return true
+	}
+	return false
+}
+
 func runAgentCmd(absRoot string, args []string) {
 	autoSeed(absRoot) // fresh project? seed floor + detected stack first
 
@@ -114,6 +124,14 @@ func runAgentCmd(absRoot string, args []string) {
 			agentAbsPath = p
 		}
 	}
+	// A bare command name from a route cmd (e.g. "claude --model …") must be resolved
+	// on PATH — otherwise filepath.Abs below turns "claude" into "<cwd>/claude", which
+	// does not exist and the launch fails "cannot find the file".
+	if agentAbsPath != "" && !filepath.IsAbs(agentAbsPath) && !strings.ContainsAny(agentAbsPath, `/\`) {
+		if p, err := exec.LookPath(agentAbsPath); err == nil {
+			agentAbsPath = p
+		}
+	}
 	if agentAbsPath == "" {
 		fmt.Fprintln(os.Stderr, "projx-engine: no agent found: set PROJX_AGENT_CMD or install an agent CLI on PATH")
 		os.Exit(1)
@@ -186,6 +204,10 @@ func runAgentCmd(absRoot string, args []string) {
 	// store ops).  storeCommit will force --by=agent regardless of what the
 	// caller passes so agentWritableKind is always enforced.
 	env = append(env, "PROJX_AGENT_CONTEXT=1")
+	// PROJX_ROLE=worker exempts this spawned agent from the trunk-dispatch gate — the
+	// trunk is denied file mutation, its workers are not. (Survives the hook's unset of
+	// PROJX_AGENT_CONTEXT, which is why this is a separate signal.)
+	env = append(env, "PROJX_ROLE=worker")
 
 	// ── Step 5b: inject secret metadata (codenames only, never values) ────────
 	// The agent process receives only the list of codename strings. Plaintext
@@ -206,7 +228,11 @@ func runAgentCmd(absRoot string, args []string) {
 	// ── Step 6: detect the OS-level confiner and print the enforcement banner ──
 	// (banner goes to STDERR, not stdout).
 	c := confine.Detect()
-	osConfined := c.Available()
+	// Cage is OPT-IN, never required: confine ONLY when explicitly requested via
+	// PROJX_CAGE. Default is uncaged (cooperative) so a dispatched worker can launch
+	// its agent binary — which lives outside any project jail and needs its own files.
+	// A confiner merely being available does not mean we impose it.
+	osConfined := c.Available() && cageRequested()
 
 	hostStr := "deny-all"
 	if len(allowHosts) > 0 {

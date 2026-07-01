@@ -134,6 +134,7 @@ func prepareAgentContext(absRoot, task string) (ctxFile string, env map[string]s
 	env = map[string]string{
 		"PROJX_STORE_CONTEXT": preamble,
 		"PROJX_AGENT_CONTEXT": "1",
+		"PROJX_ROLE":          "worker", // exempt spawned workers from the trunk-dispatch gate
 	}
 	if ctxFile != "" {
 		env["PROJX_STORE_CONTEXT_FILE"] = ctxFile

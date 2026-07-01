@@ -225,6 +225,7 @@ func TestSecretNotInAgentEnv(t *testing.T) {
 	cmd.Env = append(os.Environ(),
 		"PROJX_AGENT_CMD="+agentBin,
 		"PROJX_SECRETS_DIR="+secretsDir,
+		"PROJX_CAGE=1", // this test asserts CONFINED behavior; cage is opt-in now
 	)
 
 	var outBuf, errBuf strings.Builder
