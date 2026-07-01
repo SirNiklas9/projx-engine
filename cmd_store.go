@@ -20,13 +20,19 @@ type projectStore struct {
 	*store.Workspace
 	project *store.SQLite
 	yours   *store.SQLite
+	space   *store.SQLite // optional workspace-level store (nil when not in a workspace)
 }
 
-// Close releases both underlying files.
+// Close releases the underlying files.
 func (p *projectStore) Close() error {
 	e1 := p.project.Close()
 	if err := p.yours.Close(); err != nil && e1 == nil {
-		return err
+		e1 = err
+	}
+	if p.space != nil {
+		if err := p.space.Close(); err != nil && e1 == nil {
+			e1 = err
+		}
 	}
 	return e1
 }
@@ -81,7 +87,40 @@ func openStore(absRoot string) *projectStore {
 			die("open yours store: %v", err)
 		}
 	}
-	return &projectStore{Workspace: store.NewWorkspace(yours, project), project: project, yours: yours}
+	// Optional WORKSPACE level: a ".projx-workspace" folder on an ancestor of the repo
+	// (a multi-repo workspace like "MonkeyLabs" with its own rules). When present,
+	// workspace-scoped records compose from THERE instead of the per-user yours store.
+	// Optional — a bare repo has none, and everything still composes (project + global).
+	var space *store.SQLite
+	var spaceIface store.Store // MUST stay a true-nil interface when absent (a nil *SQLite boxed in an interface is != nil)
+	if wp := workspaceStorePath(absRoot); wp != "" {
+		if s, err := store.Open(wp); err == nil {
+			space, spaceIface = s, s
+		}
+	}
+	return &projectStore{
+		Workspace: store.NewComposite(yours, spaceIface, project),
+		project:   project, yours: yours, space: space,
+	}
+}
+
+// workspaceStorePath walks UP from absRoot for a workspace marker — a ".projx-workspace"
+// directory on an ancestor folder (holding store.db). Returns the workspace store path,
+// or "" if the repo isn't inside a workspace. Bounded walk; stops at the filesystem root.
+func workspaceStorePath(absRoot string) string {
+	dir := absRoot
+	for i := 0; i < 24; i++ {
+		marker := filepath.Join(dir, ".projx-workspace")
+		if fi, err := os.Stat(marker); err == nil && fi.IsDir() {
+			return filepath.Join(marker, "store.db")
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return ""
 }
 
 func runStoreCmd(absRoot string, args []string) {

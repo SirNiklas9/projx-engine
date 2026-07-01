@@ -162,13 +162,57 @@ func (h *PermHub) broadcast(ev PermEvent) {
 // ── HTTP control plane ──────────────────────────────────────────────────────
 
 type controlServer struct {
-	root  string
+	root  string // DEFAULT repo root (used when a request names none)
 	hub   *PermHub
 	store grants.GrantStore
 
 	runsMu sync.Mutex
 	runs   map[string]*agentRun
 	runSeq int
+
+	// The FLOAT cache: composed (project+workspace+global) stores keyed by resolved
+	// root, so ONE running engine serves any repo on demand. *sql.DB is concurrency-
+	// safe, so a shared handle is fine; handles live for the server's lifetime.
+	storesMu sync.Mutex
+	stores   map[string]*projectStore
+}
+
+// reqRoot resolves the repo a request targets: an explicit ?root= (made absolute), else
+// the server default. This is what makes one running engine FLOAT — each request names
+// its repo (the AI can refocus by changing it); the composed store opens/caches per root.
+func (s *controlServer) reqRoot(r *http.Request) string {
+	if rt := strings.TrimSpace(r.URL.Query().Get("root")); rt != "" {
+		if abs, err := filepath.Abs(rt); err == nil {
+			return abs
+		}
+		return rt
+	}
+	return s.root
+}
+
+// storeFor returns the composed store for a root, opening it once and caching it.
+func (s *controlServer) storeFor(root string) *projectStore {
+	s.storesMu.Lock()
+	defer s.storesMu.Unlock()
+	if s.stores == nil {
+		s.stores = map[string]*projectStore{}
+	}
+	if st, ok := s.stores[root]; ok {
+		return st
+	}
+	st := openStore(root)
+	s.stores[root] = st
+	return st
+}
+
+// closeStores releases every cached composed store (shutdown).
+func (s *controlServer) closeStores() {
+	s.storesMu.Lock()
+	defer s.storesMu.Unlock()
+	for _, st := range s.stores {
+		_ = st.Close()
+	}
+	s.stores = nil
 }
 
 func (s *controlServer) routes() *http.ServeMux {
@@ -196,6 +240,10 @@ func (s *controlServer) routes() *http.ServeMux {
 	mux.HandleFunc("GET /api/context/slice", s.handleContextSlice)
 	mux.HandleFunc("GET /api/context/delta", s.handleContextDelta)
 	mux.HandleFunc("GET /api/agent/spec", s.handleAgentSpec)
+	// Cross-machine knowledge sync — the engine owns the global store, so the Workbench
+	// relays send+receive here (full records + LWW merge). Keeps Global sync coherent.
+	mux.HandleFunc("GET /api/knowledge/export", s.handleKnowledgeExport)
+	mux.HandleFunc("POST /api/knowledge/merge", s.handleKnowledgeMerge)
 	return mux
 }
 
@@ -287,8 +335,7 @@ type storeRecordView struct {
 
 // handleStoreList — GET /api/store[?kind=&scope=] -> {"records":[...]}.
 func (s *controlServer) handleStoreList(w http.ResponseWriter, r *http.Request) {
-	st := openStore(s.root)
-	defer st.Close()
+	st := s.storeFor(s.reqRoot(r))
 	f := store.Filter{}
 	if k := r.URL.Query().Get("kind"); k != "" {
 		if kind, err := parseKindForList(k); err == nil {
@@ -321,8 +368,8 @@ func (s *controlServer) handleStorePut(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
-	st := openStore(s.root)
-	defer st.Close()
+	root := s.reqRoot(r)
+	st := s.storeFor(root)
 	rec := store.Record{ID: body.ID, Kind: store.Kind(body.Kind), Scope: store.Scope(body.Scope), Key: body.Key, Body: body.Body}
 	if strings.TrimSpace(rec.ID) == "" {
 		base := slug(rec.Key)
@@ -343,8 +390,8 @@ func (s *controlServer) handleStorePut(w http.ResponseWriter, r *http.Request) {
 	if had {
 		bp = &before
 	}
-	recordStoreOp(s.root, "put", "ui", bp, &rec)
-	syncProjectClaudeMD(s.root, st)
+	recordStoreOp(root, "put", "ui", bp, &rec)
+	syncProjectClaudeMD(root, st)
 	writeJSONResp(w, map[string]bool{"ok": true})
 }
 
@@ -355,23 +402,23 @@ func (s *controlServer) handleStoreDelete(w http.ResponseWriter, r *http.Request
 		http.Error(w, "missing id", http.StatusBadRequest)
 		return
 	}
-	st := openStore(s.root)
-	defer st.Close()
+	root := s.reqRoot(r)
+	st := s.storeFor(root)
 	before, had := st.Get(id)
 	if err := st.Delete(id); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	if had {
-		recordStoreOp(s.root, "delete", "ui", &before, nil)
+		recordStoreOp(root, "delete", "ui", &before, nil)
 	}
-	syncProjectClaudeMD(s.root, st)
+	syncProjectClaudeMD(root, st)
 	writeJSONResp(w, map[string]bool{"ok": true})
 }
 
 // handleStoreHistory — GET /api/store/history -> {"revisions":[...]} newest-first.
-func (s *controlServer) handleStoreHistory(w http.ResponseWriter, _ *http.Request) {
-	revs := readRevisions(s.root)
+func (s *controlServer) handleStoreHistory(w http.ResponseWriter, r *http.Request) {
+	revs := readRevisions(s.reqRoot(r))
 	for i, j := 0, len(revs)-1; i < j; i, j = i+1, j-1 {
 		revs[i], revs[j] = revs[j], revs[i]
 	}
@@ -382,15 +429,15 @@ func (s *controlServer) handleStoreHistory(w http.ResponseWriter, _ *http.Reques
 }
 
 // handleStoreUndo — POST /api/store/undo: invert the most recent op, regen CLAUDE.md.
-func (s *controlServer) handleStoreUndo(w http.ResponseWriter, _ *http.Request) {
-	st := openStore(s.root)
-	defer st.Close()
-	rev, ok := undoLastStore(s.root, st)
+func (s *controlServer) handleStoreUndo(w http.ResponseWriter, r *http.Request) {
+	root := s.reqRoot(r)
+	st := s.storeFor(root)
+	rev, ok := undoLastStore(root, st)
 	if !ok {
 		writeJSONResp(w, map[string]any{"ok": false, "msg": "nothing to undo"})
 		return
 	}
-	syncProjectClaudeMD(s.root, st)
+	syncProjectClaudeMD(root, st)
 	writeJSONResp(w, map[string]any{"ok": true, "undid": rev.Seq, "id": rev.ID})
 }
 
@@ -404,8 +451,8 @@ func syncProjectClaudeMD(root string, st store.Store) {
 	_ = os.WriteFile(path, []byte(out), 0o644)
 }
 
-func (s *controlServer) handleProfile(w http.ResponseWriter, _ *http.Request) {
-	writeJSONResp(w, loadCageConfig(s.root))
+func (s *controlServer) handleProfile(w http.ResponseWriter, r *http.Request) {
+	writeJSONResp(w, loadCageConfig(s.reqRoot(r)))
 }
 
 func writeSSE(w http.ResponseWriter, ev PermEvent) {
@@ -434,6 +481,7 @@ func runServeCmd(absRoot string, args []string) {
 	}
 	hub := newPermHub(gstore, 60*time.Second)
 	srv := &controlServer{root: absRoot, hub: hub, store: gstore}
+	defer srv.closeStores()
 
 	fmt.Printf("projx-engine: control plane on http://127.0.0.1:%s (one surface — Neovim/Workbench/phone/CLI pull from here)\n", port)
 	if err := http.ListenAndServe("127.0.0.1:"+port, srv.routes()); err != nil {
