@@ -95,7 +95,7 @@ func handleHook(absRoot string, input []byte) (stdout, stderr string, code int) 
 	switch ev.Event {
 	case "SessionStart":
 		// Refresh the code map (silently), then inject the lean floor.
-		_, _, _, _ = syncMap(absRoot)
+		_, _, _, _ = syncMap(absRoot, nil)
 		if ctx := buildSessionContext(absRoot, sid, "", false); ctx != "" {
 			return wrapProjectContext(ctx), "", 0
 		}

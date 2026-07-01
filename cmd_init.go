@@ -78,7 +78,7 @@ func runInitCmd(absRoot string, args []string) {
 	st.Close()
 
 	// 3. Index the code map.
-	runMapSync(absRoot)
+	runMapSync(absRoot, nil)
 
 	// 4. PATH check + next steps.
 	reportInitNextSteps()

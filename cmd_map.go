@@ -50,7 +50,7 @@ func runMapCmd(absRoot string, args []string) {
 	}
 	switch sub {
 	case "sync":
-		runMapSync(absRoot)
+		runMapSync(absRoot, args[1:]) // extra args = additional repo source dirs (multi-repo workspace)
 	case "list":
 		runMapList(absRoot)
 	default:
@@ -58,9 +58,11 @@ func runMapCmd(absRoot string, args []string) {
 	}
 }
 
-// runMapSync is the CLI face: it runs syncMap and prints a summary.
-func runMapSync(absRoot string) {
-	written, pruned, skipped, err := syncMap(absRoot)
+// runMapSync is the CLI face: it runs syncMap and prints a summary. Extra srcs index
+// ADDITIONAL repos into this root's store (a multi-repo workspace map), with each
+// symbol's anchor/key prefixed by its repo so cross-repo jumps stay unambiguous.
+func runMapSync(absRoot string, srcs []string) {
+	written, pruned, skipped, err := syncMap(absRoot, srcs)
 	if err != nil {
 		die("map sync: %v", err)
 	}
@@ -71,21 +73,51 @@ func runMapSync(absRoot string) {
 	fmt.Println()
 }
 
-// syncMap re-parses the project and upserts one declared-structure record per symbol,
-// pruning map records whose symbol no longer exists. Idempotent and print-free (shared
-// by the CLI and the SessionStart hook, where stdout must stay clean).
-func syncMap(absRoot string) (written, pruned int, skipped []string, err error) {
-	digests, skipped, err := core.DigestDir(absRoot)
-	if err != nil {
-		return 0, 0, skipped, err
+// syncMap re-parses each source repo and upserts one declared-structure record per
+// symbol into absRoot's store, pruning map records whose symbol no longer exists.
+// srcs == nil → the single project at absRoot (no repo prefix). Multiple srcs → a
+// workspace map spanning them, each symbol prefixed by its repo (basename of the src).
+// Idempotent and print-free (shared by the CLI and the SessionStart hook).
+func syncMap(absRoot string, srcs []string) (written, pruned int, skipped []string, err error) {
+	// Workspace resolution: explicit srcs DECLARE the workspace (persisted); with no
+	// srcs, re-use the declared workspace — so the SessionStart refresh indexes the
+	// member repos, not the empty root (which would prune the whole map).
+	prefixed := false
+	switch {
+	case len(srcs) > 0:
+		saveWorkspaceSrcs(absRoot, srcs)
+		prefixed = true
+	default:
+		if ws := loadWorkspaceSrcs(absRoot); len(ws) > 0 {
+			srcs = ws
+			prefixed = true
+		} else {
+			srcs = []string{absRoot}
+		}
 	}
+
 	st := openStore(absRoot)
 	defer st.Close()
 
-	want := make(map[string]store.Record, len(digests))
-	for _, d := range digests {
-		r := mapRecordFor(d)
-		want[r.ID] = r
+	want := make(map[string]store.Record)
+	for _, src := range srcs {
+		absSrc, aerr := filepath.Abs(src)
+		if aerr != nil {
+			continue
+		}
+		repo := ""
+		if prefixed {
+			repo = filepath.Base(absSrc)
+		}
+		digests, sk, derr := core.DigestDir(absSrc)
+		if derr != nil {
+			return written, pruned, append(skipped, sk...), fmt.Errorf("parse %s: %w", src, derr)
+		}
+		skipped = append(skipped, sk...)
+		for _, d := range digests {
+			r := mapRecordFor(d, repo)
+			want[r.ID] = r
+		}
 	}
 
 	for _, ex := range st.List(store.OfKind(store.KDeclaredStructure)) {
@@ -127,13 +159,21 @@ func runMapList(absRoot string) {
 
 // mapRecordFor renders one symbol digest into a stable declared-structure record.
 // The ID is derived from the symbol's stable ID (re-sync upserts in place); the Key
-// is a lowercase `code/<path>/<name>` path so the task-slicer matches it by token.
-func mapRecordFor(d core.SymbolDigest) store.Record {
+// is a lowercase `code/<path>/<name>` path so the task-slicer matches it by token. A
+// non-empty repo prefixes the ID/key/anchor so cross-repo entries stay distinct and
+// jumpable (e.g. anchor "Evolution/handlers/auth.go:12").
+func mapRecordFor(d core.SymbolDigest, repo string) store.Record {
 	name := d.Name
 	if d.Recv != "" {
 		name = d.Recv + "." + name
 	}
-	path := d.Anchor
+	anchor := d.Anchor
+	id := "map:" + d.ID
+	if repo != "" {
+		anchor = repo + "/" + anchor
+		id = "map:" + repo + "/" + d.ID
+	}
+	path := anchor
 	if i := strings.LastIndexByte(path, ':'); i >= 0 {
 		path = path[:i] // strip ":line"
 	}
@@ -144,10 +184,10 @@ func mapRecordFor(d core.SymbolDigest) store.Record {
 		Kind:      d.Kind.String(),
 		Signature: d.Signature,
 		Doc:       d.Doc,
-		Anchor:    d.Anchor,
+		Anchor:    anchor,
 	})
 	return store.Record{
-		ID:     "map:" + d.ID,
+		ID:     id,
 		Kind:   store.KDeclaredStructure,
 		Scope:  store.ScopeProject,
 		Key:    key,

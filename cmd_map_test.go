@@ -42,7 +42,7 @@ func ChargeCard(cents int) error {
 }
 `)
 
-	runMapSync(root)
+	runMapSync(root, nil)
 
 	// The store now holds two code-map records with anchors.
 	st := openStore(root)
@@ -87,7 +87,7 @@ func ChargeCard(cents int) error {
 	if err := os.Remove(filepath.Join(root, "billing", "charge.go")); err != nil {
 		t.Fatal(err)
 	}
-	runMapSync(root)
+	runMapSync(root, nil)
 	st = openStore(root)
 	defer st.Close()
 	got := 0
