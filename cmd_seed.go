@@ -31,12 +31,26 @@ const seedFileOrigin = "seed:file"
 
 // seedFile is the on-disk schema — arrays of typed records, human-editable.
 type seedFile struct {
-	Convention []seedKV    `toml:"convention"`
-	Gate       []seedGate  `toml:"gate"`
-	ADR        []seedKV    `toml:"adr"`
-	Doc        []seedDoc   `toml:"doc"`
-	Structure  []seedKV    `toml:"structure"`
-	Route      []seedRoute `toml:"route"`
+	Convention  []seedKV          `toml:"convention"`
+	Gate        []seedGate        `toml:"gate"`
+	ADR         []seedKV          `toml:"adr"`
+	Doc         []seedDoc         `toml:"doc"`
+	Structure   []seedKV          `toml:"structure"`
+	Route       []seedRoute       `toml:"route"`
+	Integration []seedIntegration `toml:"integration"`
+}
+
+// seedIntegration declares a provider ProjX talks to for one-shot model calls (triage /
+// decompose). transport is "cli" (a command template with {prompt}/{model}) or
+// "http-openai" (an OpenAI-compatible endpoint). Mark one active=true to select it.
+type seedIntegration struct {
+	Name      string `toml:"name"`
+	Transport string `toml:"transport"`
+	Template  string `toml:"template,omitempty"`    // cli
+	BaseURL   string `toml:"base_url,omitempty"`    // http-openai
+	APIKeyEnv string `toml:"api_key_env,omitempty"` // http-openai: env var NAME (never the key)
+	Model     string `toml:"model,omitempty"`
+	Active    bool   `toml:"active,omitempty"`
 }
 
 type seedKV struct {
@@ -139,6 +153,22 @@ func seedFileRecords(sf seedFile) []store.Record {
 	for _, r := range sf.Route {
 		add(store.KRoute, r.Class, r.Cmd, "global")
 	}
+	for _, ig := range sf.Integration {
+		if ig.Name == "" || ig.Transport == "" {
+			continue
+		}
+		rec := store.IntegrationRecord(store.CompletionSpec{
+			Name: ig.Name, Transport: ig.Transport, Template: ig.Template,
+			BaseURL: ig.BaseURL, APIKeyEnv: ig.APIKeyEnv, Model: ig.Model,
+		})
+		rec.Origin = seedFileOrigin // so a re-bake prunes a removed integration
+		recs = append(recs, rec)
+		if ig.Active {
+			act := store.IntegrationActiveRecord(ig.Name)
+			act.Origin = seedFileOrigin
+			recs = append(recs, act)
+		}
+	}
 	return recs
 }
 
@@ -221,6 +251,23 @@ func exportSeedFile(absRoot, path string) {
 	}
 	for _, r := range take(store.KRoute) {
 		sf.Route = append(sf.Route, seedRoute{Class: r.Key, Cmd: r.Body})
+	}
+	// Integrations live under setting/integration/* (excluded from `take`) — export them
+	// explicitly so a seed round-trips the provider config too.
+	active := ""
+	for _, r := range st.List(store.OfKind(store.KRoute)) {
+		if r.Key == store.SettingIntegrationActive {
+			active = strings.TrimSpace(r.Body)
+		}
+	}
+	for _, name := range store.IntegrationNames(st) {
+		if spec, ok := store.IntegrationSpec(st, name); ok {
+			sf.Integration = append(sf.Integration, seedIntegration{
+				Name: spec.Name, Transport: spec.Transport, Template: spec.Template,
+				BaseURL: spec.BaseURL, APIKeyEnv: spec.APIKeyEnv, Model: spec.Model,
+				Active: spec.Name == active,
+			})
+		}
 	}
 
 	var buf bytes.Buffer

@@ -46,13 +46,13 @@ func TestNewSelectorFuncGating(t *testing.T) {
 
 	t.Setenv("PROJX_SMART_CONTEXT", "")
 	t.Setenv("PATH", t.TempDir())
-	if newSelectorFunc() != nil {
+	if newSelectorFunc(nil) != nil {
 		t.Error("selector should be nil when PROJX_SMART_CONTEXT is unset")
 	}
 
 	// Opted in but no model on PATH → still nil.
 	t.Setenv("PROJX_SMART_CONTEXT", "1")
-	if newSelectorFunc() != nil {
+	if newSelectorFunc(nil) != nil {
 		t.Error("selector should be nil with no cheap model available")
 	}
 
@@ -66,7 +66,7 @@ func TestNewSelectorFuncGating(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", bindir)
-	if newSelectorFunc() == nil {
+	if newSelectorFunc(nil) == nil {
 		t.Error("selector should be non-nil when opted in with an agent CLI present")
 	}
 }

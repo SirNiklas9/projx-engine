@@ -10,7 +10,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
-	"time"
+
+	store "github.com/SirNiklas9/projx-store"
 )
 
 // TestParseTriageReply covers the reply parser: strict JSON, JSON with surrounding
@@ -40,9 +41,11 @@ func TestParseTriageReply(t *testing.T) {
 	}
 }
 
-// TestTriageClientHTTP drives the full client against a fake OpenAI-compatible server:
-// it must send the model + the task, and parse the returned tier.
-func TestTriageClientHTTP(t *testing.T) {
+// TestCompleterHTTP drives the completer's http-openai transport against a fake
+// OpenAI-compatible server: it must send the model + the prompt with the key from the
+// spec's api_key_env, and return the raw content (which triage then parses).
+func TestCompleterHTTP(t *testing.T) {
+	t.Setenv("PROJX_TEST_KEY", "test-key")
 	var gotModel, gotUser string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer test-key" {
@@ -68,38 +71,42 @@ func TestTriageClientHTTP(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := triageClient{
-		cfg:  triageConfig{BaseURL: srv.URL, Model: "test-haiku", APIKey: "test-key"},
-		http: &http.Client{Timeout: 5 * time.Second},
+	c := completer{spec: store.CompletionSpec{
+		Transport: store.TransportHTTPOpenAI, BaseURL: srv.URL, APIKeyEnv: "PROJX_TEST_KEY", Model: "test-haiku",
+	}}
+	raw, ok := c.complete("redesign the whole auth subsystem", "")
+	if !ok {
+		t.Fatal("complete returned not-ok")
 	}
-	tier, conf := c.Triage("redesign the whole auth subsystem")
-	if tier != "deep-reasoning" || !conf {
-		t.Fatalf("Triage = %q/%v, want deep-reasoning/true", tier, conf)
+	if tier, conf := parseTriageReply(raw); tier != "deep-reasoning" || !conf {
+		t.Fatalf("parsed = %q/%v, want deep-reasoning/true", tier, conf)
 	}
 	if gotModel != "test-haiku" {
-		t.Errorf("model not sent: %q", gotModel)
+		t.Errorf("model not sent from spec: %q", gotModel)
 	}
 	if !strings.Contains(gotUser, "redesign the whole auth") {
-		t.Errorf("task not sent as user message: %q", gotUser)
+		t.Errorf("prompt not sent as user message: %q", gotUser)
 	}
 }
 
-// TestTriageClientNon200 proves a non-200 (or any error) yields ("", false) so the
-// decider safely ignores triage and stays deterministic.
-func TestTriageClientNon200(t *testing.T) {
+// TestCompleterHTTPNon200 proves a non-200 yields ("", false) so the decider safely
+// ignores triage and stays deterministic.
+func TestCompleterHTTPNon200(t *testing.T) {
+	t.Setenv("PROJX_TEST_KEY", "k")
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer srv.Close()
-	c := triageClient{cfg: triageConfig{BaseURL: srv.URL, Model: "m", APIKey: "k"}, http: &http.Client{Timeout: 5 * time.Second}}
-	if tier, conf := c.Triage("x"); tier != "" || conf {
-		t.Errorf("non-200 should yield empty/false, got %q/%v", tier, conf)
+	c := completer{spec: store.CompletionSpec{Transport: store.TransportHTTPOpenAI, BaseURL: srv.URL, APIKeyEnv: "PROJX_TEST_KEY", Model: "m"}}
+	if raw, ok := c.complete("x", ""); ok || raw != "" {
+		t.Errorf("non-200 should yield empty/false, got %q/%v", raw, ok)
 	}
 }
 
 // TestNewTriageFuncFallbacks proves the selection order: nil only when there is neither
-// an API key NOR an agent CLI; an agent CLI on PATH yields a (CLI) triage func.
+// a declared/env provider NOR an agent CLI; an agent CLI on PATH yields a triage func.
 func TestNewTriageFuncFallbacks(t *testing.T) {
+	root := t.TempDir()
 	t.Setenv("PROJX_TRIAGE_API_KEY", "")
 	t.Setenv("OPENROUTER_API_KEY", "")
 	t.Setenv("PROJX_SECRETS_DIR", t.TempDir()) // empty secrets store
@@ -108,7 +115,7 @@ func TestNewTriageFuncFallbacks(t *testing.T) {
 
 	// No key, no agent binary on PATH → nil (deterministic).
 	t.Setenv("PATH", t.TempDir())
-	if fn := newTriageFunc(); fn != nil {
+	if fn := newTriageFunc(root); fn != nil {
 		t.Error("newTriageFunc should be nil with no key and no agent CLI")
 	}
 
@@ -122,7 +129,7 @@ func TestNewTriageFuncFallbacks(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", bindir)
-	if fn := newTriageFunc(); fn == nil {
-		t.Error("newTriageFunc should return a CLI triage func when an agent CLI is on PATH")
+	if fn := newTriageFunc(root); fn == nil {
+		t.Error("newTriageFunc should return a triage func when an agent CLI is on PATH")
 	}
 }

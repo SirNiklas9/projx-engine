@@ -51,7 +51,7 @@ func runRunCmd(absRoot string, args []string) {
 	// keeping routing fully deterministic offline).
 	cfg := routing.LoadConfig(absRoot)
 	st := openStore(absRoot)
-	d := routing.DecideWithStore(st, task, cfg, newTriageFunc())
+	d := routing.DecideWithStore(st, task, cfg, newTriageFunc(absRoot))
 	st.Close()
 
 	// ── Dry-run: print decision and return ───────────────────────────────────

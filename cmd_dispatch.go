@@ -55,7 +55,7 @@ func runDispatchCmd(absRoot string, args []string) {
 	//    endpoint is available (cheapest-first, same philosophy as the triage decider).
 	tasks := store.Decompose(message)
 	if len(tasks) < 2 {
-		if split := modelDecompose(message); len(split) > len(tasks) {
+		if split := modelDecompose(absRoot, message); len(split) > len(tasks) {
 			tasks = split
 		}
 	}
@@ -63,7 +63,7 @@ func runDispatchCmd(absRoot string, args []string) {
 	// 2. ROUTE each task through the same decider run uses — the rules pick the tier.
 	cfg := routing.LoadConfig(absRoot)
 	st := openStore(absRoot)
-	triage := newTriageFunc()
+	triage := newTriageFunc(absRoot)
 	steps := make([]dispatchStep, 0, len(tasks))
 	for _, t := range tasks {
 		steps = append(steps, dispatchStep{Task: t, Decision: routing.DecideWithStore(st, t, cfg, triage)})

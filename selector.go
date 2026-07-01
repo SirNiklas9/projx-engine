@@ -14,14 +14,8 @@ package main
 // key is set — the same transport choice as triage.go. Any failure → nil → v1 fallback.
 
 import (
-	"bytes"
-	"context"
-	"encoding/json"
-	"net/http"
 	"os"
-	"os/exec"
 	"strings"
-	"time"
 
 	store "github.com/SirNiklas9/projx-store"
 )
@@ -32,17 +26,19 @@ const selectorInstruction = `You select which knowledge areas are relevant to a 
 // is set AND a cheap model is available (a model call on every message). For the common
 // case use contextSelector, which auto-escalates only when the deterministic slice is
 // ambiguous.
-func newSelectorFunc() store.SelectorFunc {
+func newSelectorFunc(st store.Store) store.SelectorFunc {
 	if strings.TrimSpace(os.Getenv("PROJX_SMART_CONTEXT")) == "" {
 		return nil // not forced
 	}
-	return rawSelectorFunc()
+	return rawSelectorFunc(st)
 }
 
 // rawSelectorFunc is the model-backed semantic selector with no opt-in gate — nil only
-// when no cheap model is configured.
-func rawSelectorFunc() store.SelectorFunc {
-	if !cheapModelAvailable() {
+// when no provider integration is reachable. It routes through the SAME completer as
+// triage/decompose, so it follows the active integration (no vendor coupling).
+func rawSelectorFunc(st store.Store) store.SelectorFunc {
+	c, ok := newCompleter(st)
+	if !ok {
 		return nil
 	}
 	return func(task string, keys []string) []string {
@@ -50,7 +46,7 @@ func rawSelectorFunc() store.SelectorFunc {
 			return nil
 		}
 		prompt := selectorInstruction + "\n\nKEYS:\n" + strings.Join(keys, "\n") + "\n\nTASK:\n" + task
-		reply, ok := cheapComplete(prompt)
+		reply, ok := c.complete(prompt, cheapModel())
 		if !ok {
 			return nil // model failed → store degrades to v1
 		}
@@ -67,82 +63,13 @@ func rawSelectorFunc() store.SelectorFunc {
 // This spends a model call only where keyword matching is too broad — the routing
 // philosophy applied to context.
 func contextSelector(st store.Store, task string) store.SelectorFunc {
-	if s := newSelectorFunc(); s != nil {
+	if s := newSelectorFunc(st); s != nil {
 		return s // forced
 	}
 	if store.TaskSliceOverflows(st, task) {
-		return rawSelectorFunc() // auto-escalate: v1 was ambiguous
+		return rawSelectorFunc(st) // auto-escalate: v1 was ambiguous
 	}
 	return nil
-}
-
-// cheapModelAvailable reports whether some cheap-model path (HTTP key or agent CLI) exists.
-func cheapModelAvailable() bool {
-	if _, ok := loadTriageConfig(); ok {
-		return true
-	}
-	return resolveTriageBin() != ""
-}
-
-// cheapComplete sends one prompt to the cheap model — the explicit HTTP endpoint if a
-// triage key is set, otherwise the harness agent CLI — and returns the reply text.
-func cheapComplete(prompt string) (string, bool) {
-	if cfg, ok := loadTriageConfig(); ok {
-		return httpComplete(cfg, prompt)
-	}
-	if bin := resolveTriageBin(); bin != "" {
-		return cliComplete(bin, triageModel(), prompt)
-	}
-	return "", false
-}
-
-// httpComplete posts a single user message to an OpenAI-compatible endpoint.
-func httpComplete(cfg triageConfig, prompt string) (string, bool) {
-	body, _ := json.Marshal(map[string]any{
-		"model":       cfg.Model,
-		"max_tokens":  300,
-		"temperature": 0,
-		"messages":    []map[string]string{{"role": "user", "content": prompt}},
-	})
-	req, err := http.NewRequest(http.MethodPost, strings.TrimRight(cfg.BaseURL, "/")+"/chat/completions", bytes.NewReader(body))
-	if err != nil {
-		return "", false
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
-	resp, err := (&http.Client{Timeout: 12 * time.Second}).Do(req)
-	if err != nil {
-		return "", false
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", false
-	}
-	var out struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-	}
-	if json.NewDecoder(resp.Body).Decode(&out) != nil || len(out.Choices) == 0 {
-		return "", false
-	}
-	return out.Choices[0].Message.Content, true
-}
-
-// cliComplete drives the harness agent CLI (`<bin> -p <prompt> --model <cheap>`) in a
-// neutral cwd so the project's own hooks don't fire for a throwaway query.
-func cliComplete(bin, model, prompt string) (string, bool) {
-	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, bin, "-p", prompt, "--model", model)
-	cmd.Dir = neutralTriageDir()
-	out, err := cmd.Output()
-	if err != nil {
-		return "", false
-	}
-	return string(out), true
 }
 
 // parseSelectedKeys delegates to the shared store parser (one definition for every face).
