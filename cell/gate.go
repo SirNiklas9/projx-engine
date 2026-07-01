@@ -29,6 +29,19 @@ func handleGateCheck(c *pulpgin.Context) {
 	c.JSON(200, pulpgin.H{"path": c.Query("path"), "denied": denied, "pattern": pat})
 }
 
+// handleGateDispatcher — GET /api/gate/dispatcher -> {"on":bool}. Whether the
+// trunk-dispatch discipline is enabled. The hook reads the caller's role (env)
+// locally and asks the cell only for the store setting, so the deployed/Workbench
+// path enforces the trunk-deny gate identically to the native path.
+func handleGateDispatcher(c *pulpgin.Context) {
+	s, err := openStore()
+	if err != nil {
+		c.JSON(503, pulpgin.H{"error": "store unavailable: " + err.Error()})
+		return
+	}
+	c.JSON(200, pulpgin.H{"on": store.DispatcherModeOn(s)})
+}
+
 // handleAgentSpec — GET /api/agent/spec?task=... -> the engine's FULL launch
 // contract for the agent, assembled by the cell (the brain) from the store:
 //   - class/cmd: the routed model tier (auto-provisioned by task)

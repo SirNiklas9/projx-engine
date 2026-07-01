@@ -25,14 +25,17 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	store "github.com/SirNiklas9/projx-store"
 )
 
 // hookEvent is the subset of the Claude Code hook payload this handler reads.
 type hookEvent struct {
 	SessionID string `json:"session_id"`
 	Event     string `json:"hook_event_name"`
-	Cwd       string `json:"cwd"`    // project dir Claude Code ran the hook in
-	Prompt    string `json:"prompt"` // UserPromptSubmit
+	Cwd       string `json:"cwd"`       // project dir Claude Code ran the hook in
+	Prompt    string `json:"prompt"`    // UserPromptSubmit
+	ToolName  string `json:"tool_name"` // PreToolUse — which tool (Edit/Write/Read/…)
 	ToolInput struct {
 		FilePath string `json:"file_path"` // PreToolUse (Read/Edit/Write)
 	} `json:"tool_input"`
@@ -92,22 +95,43 @@ func handleHook(absRoot string, input []byte) (stdout, stderr string, code int) 
 		sid = "default"
 	}
 
+	// A spawned worker (PROJX_ROLE=worker) gets an executor directive prepended so it
+	// does the task directly instead of obeying the trunk's "dispatch, don't mutate" law.
+	frame := func(ctx string) string {
+		if ctx != "" && os.Getenv("PROJX_ROLE") == "worker" {
+			return store.WorkerDirective + ctx
+		}
+		return ctx
+	}
+
 	switch ev.Event {
 	case "SessionStart":
 		// Refresh the code map (silently), then inject the lean floor.
 		_, _, _, _ = syncMap(absRoot, nil)
 		if ctx := buildSessionContext(absRoot, sid, "", false); ctx != "" {
-			return wrapProjectContext(ctx), "", 0
+			return wrapProjectContext(frame(ctx)), "", 0
 		}
 		return "", "", 0
 
 	case "UserPromptSubmit":
 		if ctx := buildSessionContext(absRoot, sid, ev.Prompt, false); ctx != "" {
-			return wrapProjectContext(ctx), "", 0
+			return wrapProjectContext(frame(ctx)), "", 0
 		}
 		return "", "", 0
 
 	case "PreToolUse":
+		// Trunk-dispatch gate: in dispatcher-mode the TRUNK does not mutate files —
+		// every change is routed to a spawned tier-agent. A projx-spawned worker
+		// (PROJX_ROLE=worker) is exempt. This is a policy gate, NOT the cage. Off unless
+		// the setting/dispatcher-mode record is affirmative, so it never blocks by default.
+		if store.IsMutatingTool(ev.ToolName) && os.Getenv("PROJX_ROLE") != "worker" {
+			st := openStore(absRoot)
+			on := store.DispatcherModeOn(st)
+			st.Close()
+			if on {
+				return "", "ProjX dispatcher-mode: the trunk dispatches, it does not edit. Route this to a tier-agent — `projx-engine dispatch --run \"<task>\"` — or turn it off with `projx-engine store commit --kind gate-rule --key setting/dispatcher-mode --body off`.", 2
+			}
+		}
 		path := ev.ToolInput.FilePath
 		if path == "" {
 			return "", "", 0 // a matched tool with no file_path → allow

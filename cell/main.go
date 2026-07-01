@@ -43,6 +43,7 @@ func init() {
 		r.GET("/api/route", handleRoute)
 		r.GET("/api/gate", handleGate)
 		r.GET("/api/gate/check", handleGateCheck)
+		r.GET("/api/gate/dispatcher", handleGateDispatcher)
 		r.GET("/api/context/floor", handleContextFloor)
 		r.GET("/api/context/slice", handleContextSlice)
 		r.GET("/api/context/delta", handleContextDelta)

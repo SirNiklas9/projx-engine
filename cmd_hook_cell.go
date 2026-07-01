@@ -18,8 +18,11 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
+
+	store "github.com/SirNiklas9/projx-store"
 )
 
 var cellHTTP = &http.Client{Timeout: 15 * time.Second}
@@ -35,11 +38,20 @@ func handleHookViaCell(base string, input []byte) (stdout, stderr string, code i
 	}
 	base = strings.TrimRight(base, "/")
 
+	// A spawned worker (PROJX_ROLE=worker) gets the executor directive prepended so it
+	// does the task directly instead of obeying the trunk's "dispatch, don't mutate" law.
+	frame := func(ctx string) string {
+		if ctx != "" && os.Getenv("PROJX_ROLE") == "worker" {
+			return store.WorkerDirective + ctx
+		}
+		return ctx
+	}
+
 	switch ev.Event {
 	case "SessionStart":
 		if m, ok := cellReq("GET", base+"/api/context/floor?session="+url.QueryEscape(sid)); ok {
 			if floor, _ := m["floor"].(string); floor != "" {
-				return wrapProjectContext(floor), "", 0
+				return wrapProjectContext(frame(floor)), "", 0
 			}
 		}
 
@@ -47,11 +59,21 @@ func handleHookViaCell(base string, input []byte) (stdout, stderr string, code i
 		u := base + "/api/context/delta?session=" + url.QueryEscape(sid) + "&task=" + url.QueryEscape(ev.Prompt)
 		if m, ok := cellReq("GET", u); ok {
 			if ctx, _ := m["context"].(string); ctx != "" {
-				return wrapProjectContext(ctx), "", 0
+				return wrapProjectContext(frame(ctx)), "", 0
 			}
 		}
 
 	case "PreToolUse":
+		// Trunk-dispatch gate (same as the native path): deny file-mutating tools in the
+		// TRUNK when dispatcher-mode is on; a projx-spawned worker (PROJX_ROLE=worker) is
+		// exempt. Role is read locally; the cell owns the on/off setting.
+		if store.IsMutatingTool(ev.ToolName) && os.Getenv("PROJX_ROLE") != "worker" {
+			if m, ok := cellReq("GET", base+"/api/gate/dispatcher"); ok {
+				if on, _ := m["on"].(bool); on {
+					return "", "ProjX dispatcher-mode: the trunk dispatches, it does not edit. Route this to a tier-agent — `projx-engine dispatch --run \"<task>\"` — or turn it off with `projx-engine store commit --kind gate-rule --key setting/dispatcher-mode --body off`.", 2
+				}
+			}
+		}
 		p := ev.ToolInput.FilePath
 		if p == "" {
 			return "", "", 0
