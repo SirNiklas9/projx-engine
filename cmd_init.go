@@ -36,34 +36,45 @@ var connectorFS embed.FS
 // connectorRoot is the embedded path prefix to strip when writing into <root>/.claude.
 const connectorRoot = "claude-connector/.claude"
 
-// installMCPConfig writes/merges the ProjX MCP server into <root>/.mcp.json (the
-// portable MCP config any MCP agent reads). Merges into an existing file so a project's
-// own servers are preserved; creates it when absent. Returns a one-line status.
-func installMCPConfig(absRoot string) string {
+// mergeMCPServer writes/merges ONE server entry into <root>/.mcp.json (the portable
+// MCP config any MCP agent reads). Merges into an existing file so a project's own
+// (and other ProjX-registered) servers are preserved; creates the file when absent.
+// added reports whether it was newly written (false = already present, left as-is).
+func mergeMCPServer(absRoot, name string, def map[string]any) (msg string, added bool) {
 	path := filepath.Join(absRoot, ".mcp.json")
 	cfg := map[string]any{}
 	if data, err := os.ReadFile(path); err == nil {
 		if json.Unmarshal(data, &cfg) != nil {
-			return `.mcp.json exists but isn't valid JSON — add {"mcpServers":{"projx":{"command":"projx-engine","args":["mcp"]}}} by hand`
+			return fmt.Sprintf(".mcp.json exists but isn't valid JSON — add the %q server by hand", name), false
 		}
 	}
 	servers, _ := cfg["mcpServers"].(map[string]any)
 	if servers == nil {
 		servers = map[string]any{}
 	}
-	if _, exists := servers["projx"]; exists {
-		return "MCP server 'projx' already registered in .mcp.json"
+	if _, exists := servers[name]; exists {
+		return fmt.Sprintf("MCP server %q already registered in .mcp.json", name), false
 	}
-	servers["projx"] = map[string]any{"command": "projx-engine", "args": []string{"mcp"}}
+	servers[name] = def
 	cfg["mcpServers"] = servers
 	out, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
-		return "could not encode .mcp.json: " + err.Error()
+		return "could not encode .mcp.json: " + err.Error(), false
 	}
 	if err := os.WriteFile(path, append(out, '\n'), 0o644); err != nil {
-		return "could not write .mcp.json: " + err.Error()
+		return "could not write .mcp.json: " + err.Error(), false
 	}
-	return "MCP server 'projx' registered → .mcp.json (any MCP agent: store_query/route/gate_check/store_commit)"
+	return fmt.Sprintf("MCP server %q registered → .mcp.json", name), true
+}
+
+// installMCPConfig registers ProjX's own MCP server (store_query/route/gate_check/
+// impact/store_commit) — the agent-agnostic pull surface, additive to the hooks.
+func installMCPConfig(absRoot string) string {
+	msg, added := mergeMCPServer(absRoot, "projx", map[string]any{"command": "projx-engine", "args": []string{"mcp"}})
+	if added {
+		return msg + " (any MCP agent: store_query/route/gate_check/impact/store_commit)"
+	}
+	return msg
 }
 
 func runInitCmd(absRoot string, args []string) {
@@ -95,6 +106,13 @@ func runInitCmd(absRoot string, args []string) {
 	// still do push + enforce); merges, never clobbers other servers.
 	if msg := installMCPConfig(absRoot); msg != "" {
 		fmt.Println("init: " + msg)
+	}
+
+	// 1c. If CodeGraph is already installed (NEVER auto-installed by ProjX), wire it up
+	// too: build its index, register its MCP server, declare the preference as a real,
+	// editable store convention. Silent no-op when it isn't present.
+	for _, line := range wireCodeGraph(absRoot) {
+		fmt.Println("init: " + line)
 	}
 
 	// 2. Seed the store (floor + stacks), only if the project has no knowledge yet.
