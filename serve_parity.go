@@ -33,6 +33,13 @@ func (s *controlServer) handleGate(w http.ResponseWriter, r *http.Request) {
 	writeJSONResp(w, map[string]any{"deny": store.DenyRules(s.storeFor(s.reqRoot(r)))})
 }
 
+// GET /api/gate/patterns[?root=] -> the RAW off-limits glob patterns (not the
+// Read()/Edit()-wrapped strings /api/gate returns) — what a raw path-match check
+// (a file-access Allows(), or a project-parse filter) needs.
+func (s *controlServer) handleGatePatterns(w http.ResponseWriter, r *http.Request) {
+	writeJSONResp(w, map[string]any{"patterns": store.GatePatterns(s.storeFor(s.reqRoot(r)))})
+}
+
 // GET /api/gate/check?path=[&root=] -> {denied, pattern}: the path-vs-gate decision.
 func (s *controlServer) handleGateCheck(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Query().Get("path")

@@ -108,13 +108,6 @@ func runInitCmd(absRoot string, args []string) {
 		fmt.Println("init: " + msg)
 	}
 
-	// 1c. If CodeGraph is already installed (NEVER auto-installed by ProjX), wire it up
-	// too: build its index, register its MCP server, declare the preference as a real,
-	// editable store convention. Silent no-op when it isn't present.
-	for _, line := range wireCodeGraph(absRoot) {
-		fmt.Println("init: " + line)
-	}
-
 	// 2. Seed the store (floor + stacks), only if the project has no knowledge yet.
 	st := openStore(absRoot)
 	empty := len(st.List(store.InScope(store.ScopeProject))) == 0
@@ -133,6 +126,16 @@ func runInitCmd(absRoot string, args []string) {
 		fmt.Println("init: store already has knowledge — left as-is (no re-seed)")
 	}
 	st.Close()
+
+	// 2a. If CodeGraph is already installed (NEVER auto-installed by ProjX), wire it up
+	// too: build its index, register its MCP server, declare the preference as a real,
+	// editable store convention. Silent no-op when it isn't present. Runs AFTER floor
+	// seeding — it writes a project-scoped record itself, and running it before the
+	// "is the store empty" check above would make a truly fresh project look non-empty
+	// and silently skip the floor seed entirely on any machine with CodeGraph installed.
+	for _, line := range wireCodeGraph(absRoot) {
+		fmt.Println("init: " + line)
+	}
 
 	// 2b. Bake a declared seed file if the project ships one (projx.seed.toml /
 	// .projx/seed.toml) — so cloning a repo + `init` reproduces its whole rule-set.

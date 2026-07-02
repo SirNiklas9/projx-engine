@@ -234,6 +234,7 @@ func (s *controlServer) routes() *http.ServeMux {
 	// agent spec — so `serve` is the ONE full control plane the Workbench relays to.
 	mux.HandleFunc("GET /api/route", s.handleRoute)
 	mux.HandleFunc("GET /api/gate", s.handleGate)
+	mux.HandleFunc("GET /api/gate/patterns", s.handleGatePatterns)
 	mux.HandleFunc("GET /api/gate/check", s.handleGateCheck)
 	mux.HandleFunc("GET /api/gate/dispatcher", s.handleGateDispatcher)
 	mux.HandleFunc("GET /api/context/floor", s.handleContextFloor)
