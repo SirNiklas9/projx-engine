@@ -122,6 +122,8 @@ func main() {
 		runDispatchCmd(absRoot, rest)
 	case "mcp":
 		runMCPCmd(absRoot, rest)
+	case "impact":
+		runImpactCmd(absRoot, rest)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command %q\n\n", cmd)
 		usage()

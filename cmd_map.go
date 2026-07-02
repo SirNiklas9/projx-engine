@@ -43,6 +43,14 @@ type mapAnchorBody struct {
 	// Terms are distinctive body words (calls + string literals) so a concept buried in
 	// a differently-named function is still matched — deterministic Level-1 auto-seed.
 	Terms string `json:"terms,omitempty"`
+	// Name is the symbol's bare name (Recv.Name for methods) — the join key blast-radius
+	// matches Calls against. Redundant with the Key suffix, but kept explicit so impact.go
+	// never has to re-derive it by parsing the key.
+	Name string `json:"name,omitempty"`
+	// Calls are the RAW callee names this symbol invokes (unresolved, may include a
+	// package/receiver qualifier) — the raw material for an APPROXIMATE, name-matched
+	// blast-radius (see impact.go). Not a precise, type-aware call graph.
+	Calls []string `json:"calls,omitempty"`
 }
 
 // runMapCmd dispatches `map <sync|list>`.
@@ -189,6 +197,8 @@ func mapRecordFor(d core.SymbolDigest, repo string) store.Record {
 		Doc:       d.Doc,
 		Anchor:    anchor,
 		Terms:     d.Terms,
+		Name:      name,
+		Calls:     d.Calls,
 	})
 	return store.Record{
 		ID:     id,

@@ -122,6 +122,15 @@ func mcpTools() []map[string]any {
 			}, "path"),
 		},
 		{
+			"name":        "impact",
+			"description": "Blast radius: who calls this symbol, transitively (up to a few hops). Deterministic, name-matched from the code-map — approximate (no type resolution), but fast and self-contained. Use before changing a widely-used symbol.",
+			"inputSchema": obj(map[string]any{
+				"symbol": mcpStr("the symbol/function name to check (bare name, e.g. \"Add\")"),
+				"depth":  mcpStr("optional: max hops to walk transitively (default 3)"),
+				"root":   mcpStr("optional repo root"),
+			}, "symbol"),
+		},
+		{
 			"name":        "store_commit",
 			"description": "Save a durable fact into this project's ProjX store as a doc/convention/adr record (NOT a markdown file). Use when you learn something worth keeping.",
 			"inputSchema": obj(map[string]any{
@@ -180,6 +189,24 @@ func mcpToolCall(req mcpReq, defaultRoot string) mcpResp {
 	case "route":
 		d := store.RouteDecide(st, arg("task"), nil)
 		return text(fmt.Sprintf("tier: %s\ncmd: %s\nreason: %s", d.Class, d.Cmd, d.Reason), false)
+	case "impact":
+		depth := 0
+		if d := arg("depth"); d != "" {
+			fmt.Sscanf(d, "%d", &depth)
+		}
+		hits, truncated := computeImpact(st, arg("symbol"), depth)
+		if len(hits) == 0 {
+			return text("no callers found for "+arg("symbol")+" in the indexed code-map", false)
+		}
+		var b strings.Builder
+		fmt.Fprintf(&b, "%d symbol(s) reach %s:\n", len(hits), arg("symbol"))
+		for _, h := range hits {
+			fmt.Fprintf(&b, "  [depth %d] %s  %s\n", h.Depth, h.Name, h.Anchor)
+		}
+		if truncated {
+			b.WriteString("(truncated — very wide blast radius)\n")
+		}
+		return text(b.String(), false)
 	case "gate_check":
 		pat, denied := store.GateDenied(st, arg("path"))
 		if denied {
