@@ -40,9 +40,18 @@ func handleHookViaCell(base string, input []byte) (stdout, stderr string, code i
 
 	// A spawned worker (PROJX_ROLE=worker) gets the executor directive prepended so it
 	// does the task directly instead of obeying the trunk's "dispatch, don't mutate" law.
+	// The directive is the SAME editable store record the native path reads — fetched
+	// from the cell's /api/context/worker-directive; degrades to the built-in default
+	// text if the cell is briefly unreachable (never leaves a worker with no reframing).
 	frame := func(ctx string) string {
 		if ctx != "" && os.Getenv("PROJX_ROLE") == "worker" {
-			return store.WorkerDirective + ctx
+			wd := store.DefaultWorkerDirective
+			if m, ok := cellReq("GET", base+"/api/context/worker-directive"); ok {
+				if t, _ := m["text"].(string); t != "" {
+					wd = t
+				}
+			}
+			return wd + ctx
 		}
 		return ctx
 	}

@@ -97,9 +97,15 @@ func handleHook(absRoot string, input []byte) (stdout, stderr string, code int) 
 
 	// A spawned worker (PROJX_ROLE=worker) gets an executor directive prepended so it
 	// does the task directly instead of obeying the trunk's "dispatch, don't mutate" law.
+	// The directive text is a real, editable store record (store.WorkerDirectiveText),
+	// not a hardcoded constant — fetched fresh so a `store commit` change takes effect
+	// immediately, no recompile.
 	frame := func(ctx string) string {
 		if ctx != "" && os.Getenv("PROJX_ROLE") == "worker" {
-			return store.WorkerDirective + ctx
+			wst := openStore(absRoot)
+			wd := store.WorkerDirectiveText(wst)
+			wst.Close()
+			return wd + ctx
 		}
 		return ctx
 	}

@@ -42,6 +42,19 @@ func handleGateDispatcher(c *pulpgin.Context) {
 	c.JSON(200, pulpgin.H{"on": store.DispatcherModeOn(s)})
 }
 
+// handleWorkerDirective — GET /api/context/worker-directive -> {"text": ...}. The
+// EDITABLE worker-role directive (store.WorkerDirectiveText), so the deployed cell's
+// hook path gets the SAME store-declared text as the native path — not a hardcoded
+// constant duplicated in two places.
+func handleWorkerDirective(c *pulpgin.Context) {
+	s, err := openStore()
+	if err != nil {
+		c.JSON(503, pulpgin.H{"error": "store unavailable: " + err.Error()})
+		return
+	}
+	c.JSON(200, pulpgin.H{"text": store.WorkerDirectiveText(s)})
+}
+
 // handleAgentSpec — GET /api/agent/spec?task=... -> the engine's FULL launch
 // contract for the agent, assembled by the cell (the brain) from the store:
 //   - class/cmd: the routed model tier (auto-provisioned by task)

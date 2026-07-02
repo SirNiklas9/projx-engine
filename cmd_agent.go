@@ -23,16 +23,21 @@ import (
 	"github.com/SirNiklas9/projx-engine/internal/confine"
 	"github.com/SirNiklas9/projx-engine/internal/jail"
 	"github.com/SirNiklas9/projx-engine/internal/secrets"
+	store "github.com/SirNiklas9/projx-store"
 )
 
-// cageRequested reports whether the caller explicitly opted into OS-level
-// confinement (PROJX_CAGE truthy). Cage is opt-in, never required — default uncaged.
-func cageRequested() bool {
+// cageRequested reports whether this launch should be OS-confined. PROJX_CAGE, when
+// set, always wins as an explicit override (on OR off); absent that, it defers to the
+// project's DECLARED default (store.CageModeOn — a real, editable setting/cage-mode
+// record, seeded "off"). Cage is opt-in, never required.
+func cageRequested(st store.Store) bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("PROJX_CAGE"))) {
 	case "1", "on", "true", "yes":
 		return true
+	case "0", "off", "false", "no":
+		return false
 	}
-	return false
+	return store.CageModeOn(st)
 }
 
 func runAgentCmd(absRoot string, args []string) {
@@ -228,11 +233,14 @@ func runAgentCmd(absRoot string, args []string) {
 	// ── Step 6: detect the OS-level confiner and print the enforcement banner ──
 	// (banner goes to STDERR, not stdout).
 	c := confine.Detect()
-	// Cage is OPT-IN, never required: confine ONLY when explicitly requested via
-	// PROJX_CAGE. Default is uncaged (cooperative) so a dispatched worker can launch
-	// its agent binary — which lives outside any project jail and needs its own files.
-	// A confiner merely being available does not mean we impose it.
-	osConfined := c.Available() && cageRequested()
+	// Cage is OPT-IN, never required: confine ONLY when requested (PROJX_CAGE override,
+	// else the project's declared setting/cage-mode — default off). Default is uncaged
+	// (cooperative) so a dispatched worker can launch its agent binary — which lives
+	// outside any project jail and needs its own files. A confiner merely being
+	// available does not mean we impose it.
+	cageSt := openStore(absRoot)
+	osConfined := c.Available() && cageRequested(cageSt)
+	cageSt.Close()
 
 	hostStr := "deny-all"
 	if len(allowHosts) > 0 {
