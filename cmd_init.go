@@ -16,6 +16,7 @@ package main
 
 import (
 	"embed"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
@@ -34,6 +35,36 @@ var connectorFS embed.FS
 
 // connectorRoot is the embedded path prefix to strip when writing into <root>/.claude.
 const connectorRoot = "claude-connector/.claude"
+
+// installMCPConfig writes/merges the ProjX MCP server into <root>/.mcp.json (the
+// portable MCP config any MCP agent reads). Merges into an existing file so a project's
+// own servers are preserved; creates it when absent. Returns a one-line status.
+func installMCPConfig(absRoot string) string {
+	path := filepath.Join(absRoot, ".mcp.json")
+	cfg := map[string]any{}
+	if data, err := os.ReadFile(path); err == nil {
+		if json.Unmarshal(data, &cfg) != nil {
+			return `.mcp.json exists but isn't valid JSON — add {"mcpServers":{"projx":{"command":"projx-engine","args":["mcp"]}}} by hand`
+		}
+	}
+	servers, _ := cfg["mcpServers"].(map[string]any)
+	if servers == nil {
+		servers = map[string]any{}
+	}
+	if _, exists := servers["projx"]; exists {
+		return "MCP server 'projx' already registered in .mcp.json"
+	}
+	servers["projx"] = map[string]any{"command": "projx-engine", "args": []string{"mcp"}}
+	cfg["mcpServers"] = servers
+	out, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return "could not encode .mcp.json: " + err.Error()
+	}
+	if err := os.WriteFile(path, append(out, '\n'), 0o644); err != nil {
+		return "could not write .mcp.json: " + err.Error()
+	}
+	return "MCP server 'projx' registered → .mcp.json (any MCP agent: store_query/route/gate_check/store_commit)"
+}
 
 func runInitCmd(absRoot string, args []string) {
 	force := false
@@ -56,6 +87,14 @@ func runInitCmd(absRoot string, args []string) {
 		fmt.Printf("; %s)\n", skipped)
 	} else {
 		fmt.Println(")")
+	}
+
+	// 1b. Register the ProjX MCP server in <root>/.mcp.json — the portable, agent-
+	// AGNOSTIC MCP config, so Claude Code / Cursor / Codex / Cline all get the store
+	// tools (store_query/route/gate_check/store_commit). Additive to the hooks (which
+	// still do push + enforce); merges, never clobbers other servers.
+	if msg := installMCPConfig(absRoot); msg != "" {
+		fmt.Println("init: " + msg)
 	}
 
 	// 2. Seed the store (floor + stacks), only if the project has no knowledge yet.
