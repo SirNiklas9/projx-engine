@@ -84,6 +84,12 @@ func installMCPConfig(absRoot string) string {
 func runInitCmd(absRoot string, args []string) {
 	var stacks []string
 	for _, a := range args {
+		if a == "--global" {
+			// The one-time, per-machine ProjX bootstrap (global hook + floor + skill),
+			// distinct from ProjX-enabling a project. It ignores --root by design.
+			runGlobalBootstrap()
+			return
+		}
 		if a == "--force" {
 			continue // retained for compatibility; the connector no longer writes a hook file
 		}

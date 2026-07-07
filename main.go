@@ -193,8 +193,12 @@ Usage:
 
 Real commands:
   init [stacks...] [--force]              ProjX-enable this project: install the Claude Code
-                                            connector (hooks + /projx:* slash commands), seed the
+                                            connector (/projx:* slash commands + MCP), seed the
                                             store, and index the code map. One command to turn it on.
+  init --global                           One-time per-machine bootstrap: merge the ProjX lifecycle
+                                            hook into ~/.claude/settings.json (preserving existing
+                                            hooks), seed the global-scope floor, install the projx
+                                            skill. Idempotent; does NOT (re)install the binary.
   hook                                     Claude Code lifecycle handler — reads the hook JSON on
                                             stdin and dispatches (SessionStart/UserPromptSubmit/
                                             PreToolUse/PreCompact/Stop). Called by settings.json; no bash.
