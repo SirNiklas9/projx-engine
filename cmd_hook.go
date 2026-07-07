@@ -126,24 +126,33 @@ func handleHook(absRoot string, input []byte) (stdout, stderr string, code int) 
 		return "", "", 0
 
 	case "PreToolUse":
+		path := ev.ToolInput.FilePath
+		// TARGET-based scope (adr/scope-resolution-is-target-based): the rules that apply
+		// are the ones of the project CONTAINING the file being touched, not the process
+		// cwd. Walk up from the target path to its owning .projx; fall back to cwd only
+		// when there is no file_path (a session-level tool). The global floor still fires
+		// because openStore always composes the per-user store over this project.
+		storeRoot := targetStoreRoot(absRoot, path)
+
 		// Trunk-dispatch gate: in dispatcher-mode the TRUNK does not mutate files —
 		// every change is routed to a spawned tier-agent. A projx-spawned worker
 		// (PROJX_ROLE=worker) is exempt. This is a policy gate, NOT the cage. Off unless
 		// the setting/dispatcher-mode record is affirmative, so it never blocks by default.
+		// Resolved from the TARGET's store: editing a file in a repo without dispatcher-mode
+		// is allowed even when cwd is a repo that has it on.
 		if store.IsMutatingTool(ev.ToolName) && os.Getenv("PROJX_ROLE") != "worker" {
-			st := openStore(absRoot)
+			st := openStore(storeRoot)
 			on := store.DispatcherModeOn(st)
 			st.Close()
 			if on {
 				return "", "ProjX dispatcher-mode: the trunk dispatches, it does not edit. Route this to a tier-agent — `projx-engine dispatch --run \"<task>\"` — or turn it off with `projx-engine store commit --kind gate-rule --key setting/dispatcher-mode --body off`.", 2
 			}
 		}
-		path := ev.ToolInput.FilePath
 		if path == "" {
 			return "", "", 0 // a matched tool with no file_path → allow
 		}
-		st := openStore(absRoot)
-		pat, denied := gateDeniedPath(st, path)
+		st := openStore(storeRoot)
+		pat, denied := gateDeniedPath(st, gateRelPath(storeRoot, absRoot, path))
 		st.Close()
 		if denied {
 			return "", fmt.Sprintf("ProjX gate: %q is off-limits by gate rule %q.", path, pat), 2

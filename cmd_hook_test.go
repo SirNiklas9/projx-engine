@@ -1,10 +1,13 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	store "github.com/SirNiklas9/projx-store"
 )
 
 // TestHandleHookLifecycle drives every event through handleHook and asserts the
@@ -101,4 +104,74 @@ func mustAbs(t *testing.T, p string) string {
 		t.Fatal(err)
 	}
 	return a
+}
+
+// TestPreToolUseTargetBasedScope proves scope resolution FOLLOWS the target file, not the
+// cwd (adr/scope-resolution-is-target-based). Layout: a ROOT store with dispatcher-mode ON
+// and a CHILD repo store (root/child/.projx) with it OFF. Running the hook with cwd=root:
+//   - editing a file in the child (no dispatcher-mode) is ALLOWED, and
+//   - editing a file at the root (dispatcher-mode ON) is BLOCKED.
+//
+// Plus: the child's own off-limits glob still blocks, and a GLOBAL-floor gate still fires
+// on the child target — no gate is weakened by making resolution target-based.
+func TestPreToolUseTargetBasedScope(t *testing.T) {
+	yoursDir := t.TempDir()
+	t.Setenv("PROJX_YOURS_DIR", yoursDir) // isolate the global (yours) store from the real machine
+	os.Unsetenv("PROJX_ROLE")
+
+	root := t.TempDir()
+	child := filepath.Join(root, "child")
+	if err := os.MkdirAll(child, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Global floor: a secret glob in the per-user (yours) store — must fire for ANY target.
+	gst := openStore(root)
+	if err := gst.Put(store.Record{ID: "gate/global-pem", Kind: store.KGateRule, Scope: store.ScopeGlobal, Key: "global-pem", Body: "**/*.pem"}); err != nil {
+		t.Fatalf("seed global gate: %v", err)
+	}
+	gst.Close()
+
+	// Root project store: dispatcher-mode ON.
+	rst := openStore(root)
+	if err := rst.Put(store.Record{ID: "gate-rule/setting-dispatcher-mode", Kind: store.KGateRule, Scope: store.ScopeProject, Key: store.SettingDispatcherMode, Body: "on"}); err != nil {
+		t.Fatalf("seed root dispatcher-mode: %v", err)
+	}
+	rst.Close()
+
+	// Child project store: NO dispatcher-mode, but its own off-limits glob.
+	cst := openStore(child)
+	if err := cst.Put(store.Record{ID: "gate-rule/secrets-dir", Kind: store.KGateRule, Scope: store.ScopeProject, Key: "secrets-dir", Body: "secret/**"}); err != nil {
+		t.Fatalf("seed child gate: %v", err)
+	}
+	cst.Close()
+
+	edit := func(fp string) (string, int) {
+		_, errOut, code := handleHook(root, []byte(`{"hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":`+jsonStr(fp)+`}}`))
+		return errOut, code
+	}
+
+	// Edit inside the child (dispatcher-mode OFF there) → ALLOWED even though cwd=root has it ON.
+	if _, code := edit(filepath.Join(child, "src", "app.go")); code != 0 {
+		t.Errorf("edit to child path should be allowed (code 0), got %d", code)
+	}
+	// Edit at the root (dispatcher-mode ON) → BLOCKED.
+	if errOut, code := edit(filepath.Join(root, "main.go")); code != 2 || !strings.Contains(errOut, "dispatcher-mode") {
+		t.Errorf("edit to root path should be dispatcher-blocked (code 2), got code %d stderr %q", code, errOut)
+	}
+	// Child's OWN off-limits glob still blocks a child secret path.
+	if errOut, code := edit(filepath.Join(child, "secret", "key.txt")); code != 2 || !strings.Contains(errOut, "off-limits") {
+		t.Errorf("child secret path should be off-limits (code 2), got code %d stderr %q", code, errOut)
+	}
+	// The GLOBAL floor still fires for a child target (a .pem there is denied).
+	if errOut, code := edit(filepath.Join(child, "certs", "server.pem")); code != 2 || !strings.Contains(errOut, "off-limits") {
+		t.Errorf("global-floor gate should still fire on child target (code 2), got code %d stderr %q", code, errOut)
+	}
+}
+
+// jsonStr quotes a filesystem path into a valid JSON string literal (escapes backslashes
+// so Windows paths round-trip through the hook payload).
+func jsonStr(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
 }
