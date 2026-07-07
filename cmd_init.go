@@ -3,16 +3,20 @@ package main
 // cmd_init.go — `projx-engine init` : the one-command on-ramp.
 //
 // It ProjX-enables a project in a single step:
-//   1. writes the Claude Code connector into <root>/.claude (lifecycle hooks +
-//      namespaced /projx:* slash commands), from templates EMBEDDED in this binary
-//      (so an installed engine needs no repo checkout);
-//   2. seeds the store floor + the detected language stack (idempotent — never
-//      clobbers an already-populated store);
-//   3. indexes the code map (`map sync`);
-//   4. checks the engine is on PATH and reports next steps.
+//   1. installs the Claude Code connector into <root>/.claude — the namespaced
+//      /projx:* slash commands ONLY. It does NOT write a per-project settings.json:
+//      the ProjX lifecycle hook is installed ONCE, GLOBALLY, in ~/.claude/settings.json
+//      and does all injection; a per-project hook would DOUBLE-inject (adr/global-hook-
+//      single-injection). An existing project settings.json is left untouched.
+//   2. registers the ProjX MCP server in <root>/.mcp.json (agent-agnostic pull surface);
+//   3. seeds the store — the universal floor + detected stack (only when the store is
+//      empty), then a DETERMINISTIC smart seed (recipes / off-limits / architecture),
+//      idempotent so re-running never duplicates (adr/seed-beefup-smart-init);
+//   4. indexes the code map (`map sync`);
+//   5. checks the engine is on PATH and reports next steps.
 //
-// Re-runnable: existing hooks/commands are refreshed; an existing settings.json is
-// NOT overwritten unless --force is given (so a project's own hooks are preserved).
+// Re-runnable: slash commands are refreshed; the smart seed and floor seed skip records
+// that already exist, so nothing is clobbered or duplicated.
 
 import (
 	"embed"
@@ -27,7 +31,7 @@ import (
 	store "github.com/SirNiklas9/projx-store"
 )
 
-// connectorFS embeds the connector templates (hooks, settings, slash commands).
+// connectorFS embeds the connector templates (settings reference + slash commands).
 // `all:` includes dotfiles (.claude) which a bare embed pattern would skip.
 //
 //go:embed all:claude-connector/.claude
@@ -78,37 +82,35 @@ func installMCPConfig(absRoot string) string {
 }
 
 func runInitCmd(absRoot string, args []string) {
-	force := false
 	var stacks []string
 	for _, a := range args {
 		if a == "--force" {
-			force = true
-			continue
+			continue // retained for compatibility; the connector no longer writes a hook file
 		}
 		stacks = append(stacks, strings.ToLower(strings.TrimSpace(a)))
 	}
 
-	// 1. Write the connector into <root>/.claude from the embedded templates.
-	written, skipped, err := installConnector(absRoot, force)
+	// 1. Install the connector's /projx:* slash commands into <root>/.claude. The
+	// lifecycle hooks are NOT installed per-project — the single global hook in
+	// ~/.claude/settings.json does all injection (a per-project hook would double-inject).
+	written, note, err := installConnector(absRoot)
 	if err != nil {
 		die("init: install connector: %v", err)
 	}
-	fmt.Printf("init: connector installed → %s (%d file(s) written", filepath.Join(absRoot, ".claude"), written)
-	if skipped != "" {
-		fmt.Printf("; %s)\n", skipped)
-	} else {
-		fmt.Println(")")
+	fmt.Printf("init: slash commands installed → %s (%d file(s) written)\n", filepath.Join(absRoot, ".claude"), written)
+	if note != "" {
+		fmt.Println("init: " + note)
 	}
 
 	// 1b. Register the ProjX MCP server in <root>/.mcp.json — the portable, agent-
 	// AGNOSTIC MCP config, so Claude Code / Cursor / Codex / Cline all get the store
-	// tools (store_query/route/gate_check/store_commit). Additive to the hooks (which
-	// still do push + enforce); merges, never clobbers other servers.
+	// tools (store_query/route/gate_check/store_commit). Additive; merges, never clobbers.
 	if msg := installMCPConfig(absRoot); msg != "" {
 		fmt.Println("init: " + msg)
 	}
 
-	// 2. Seed the store (floor + stacks), only if the project has no knowledge yet.
+	// 2. Seed the store. The floor + stack profiles seed only into a FRESH store (never
+	// clobber declared knowledge); the smart seed then enriches idempotently.
 	st := openStore(absRoot)
 	empty := len(st.List(store.InScope(store.ScopeProject))) == 0
 	if empty {
@@ -123,21 +125,25 @@ func runInitCmd(absRoot string, args []string) {
 			fmt.Printf("init: seeded floor%s (%d records)\n", stackSuffix(names), n)
 		}
 	} else {
-		fmt.Println("init: store already has knowledge — left as-is (no re-seed)")
+		fmt.Println("init: store already has knowledge — floor left as-is (no re-seed)")
+	}
+
+	// 2a. Smart seed — scan the project and DETERMINISTICALLY seed build/test/run recipes,
+	// the off-limits gate floor, and a high-level architecture summary. Idempotent: it
+	// skips any record that already exists, so re-running init never duplicates.
+	if n, notes := smartSeed(st, absRoot); n > 0 {
+		fmt.Printf("init: smart-seeded %d record(s) — %s\n", n, strings.Join(notes, ", "))
 	}
 	st.Close()
 
-	// 2a. If CodeGraph is already installed (NEVER auto-installed by ProjX), wire it up
+	// 2b. If CodeGraph is already installed (NEVER auto-installed by ProjX), wire it up
 	// too: build its index, register its MCP server, declare the preference as a real,
-	// editable store convention. Silent no-op when it isn't present. Runs AFTER floor
-	// seeding — it writes a project-scoped record itself, and running it before the
-	// "is the store empty" check above would make a truly fresh project look non-empty
-	// and silently skip the floor seed entirely on any machine with CodeGraph installed.
+	// editable store convention. Silent no-op when it isn't present.
 	for _, line := range wireCodeGraph(absRoot) {
 		fmt.Println("init: " + line)
 	}
 
-	// 2b. Bake a declared seed file if the project ships one (projx.seed.toml /
+	// 2c. Bake a declared seed file if the project ships one (projx.seed.toml /
 	// .projx/seed.toml) — so cloning a repo + `init` reproduces its whole rule-set.
 	if p := seedPathArg(absRoot, nil); fileExists(p) {
 		applySeedFile(absRoot, p)
@@ -150,10 +156,12 @@ func runInitCmd(absRoot string, args []string) {
 	reportInitNextSteps()
 }
 
-// installConnector writes every embedded connector file into <root>/.claude, returning
-// the count written and a note about anything skipped. Shell scripts are written
-// executable; an existing settings.json is preserved unless force is set.
-func installConnector(absRoot string, force bool) (written int, skipped string, err error) {
+// installConnector writes the embedded connector's slash-command files into <root>/.claude
+// and returns the count written plus an optional note. It deliberately SKIPS the connector's
+// settings.json: the ProjX lifecycle hook lives once in the GLOBAL ~/.claude/settings.json
+// and does all injection, so writing a per-project hook file would double-inject. An existing
+// project settings.json is left exactly as the user has it.
+func installConnector(absRoot string) (written int, note string, err error) {
 	walkErr := fs.WalkDir(connectorFS, connectorRoot, func(p string, d fs.DirEntry, e error) error {
 		if e != nil {
 			return e
@@ -162,16 +170,16 @@ func installConnector(absRoot string, force bool) (written int, skipped string, 
 			return nil
 		}
 		rel := strings.TrimPrefix(p, connectorRoot+"/")
-		dst := filepath.Join(absRoot, ".claude", filepath.FromSlash(rel))
 
-		// Preserve a project's own settings.json unless --force.
-		if rel == "settings.json" && !force {
-			if _, statErr := os.Stat(dst); statErr == nil {
-				skipped = "settings.json kept (merge hooks by hand or rerun with --force)"
-				return nil
+		// Never install a per-project settings.json — the global hook owns injection.
+		if rel == "settings.json" {
+			if _, statErr := os.Stat(filepath.Join(absRoot, ".claude", "settings.json")); statErr == nil {
+				note = "existing .claude/settings.json left as-is (ProjX hooks are global now; a per-project hook would double-inject)"
 			}
+			return nil
 		}
 
+		dst := filepath.Join(absRoot, ".claude", filepath.FromSlash(rel))
 		data, rerr := connectorFS.ReadFile(p)
 		if rerr != nil {
 			return rerr
@@ -189,7 +197,7 @@ func installConnector(absRoot string, force bool) (written int, skipped string, 
 		written++
 		return nil
 	})
-	return written, skipped, walkErr
+	return written, note, walkErr
 }
 
 // reportInitNextSteps checks the engine is reachable on PATH and prints what to do next.
@@ -198,13 +206,13 @@ func reportInitNextSteps() {
 	if _, lookErr := exec.LookPath("projx-engine"); lookErr == nil {
 		onPath = true
 	}
-	fmt.Println("\ninit: ready. Open Claude Code in this project — the connector loads automatically.")
+	fmt.Println("\ninit: ready. Open Claude Code in this project — the GLOBAL ProjX hook loads the store automatically.")
 	fmt.Println("  • SessionStart injects the lean floor; each message injects a task-sliced delta")
 	fmt.Println("  • /projx:remember <fact>   save knowledge   • /projx:store   show the store")
 	fmt.Println("  • /projx:route <task>      see the tier     • /projx:gate    list off-limits paths")
 	if !onPath {
 		self, _ := os.Executable()
-		fmt.Printf("\ninit: NOTE — `projx-engine` is not on your PATH. Hooks expect it there, or set\n")
+		fmt.Printf("\ninit: NOTE — `projx-engine` is not on your PATH. The hook expects it there, or set\n")
 		fmt.Printf("      PROJX_ENGINE_BIN to this binary: %s\n", self)
 	}
 }

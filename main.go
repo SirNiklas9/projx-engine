@@ -201,6 +201,7 @@ Real commands:
   store get <id>                          get a record by id
   store list [--kind <name>] [--scope ..]  list records
   store commit --kind .. --key .. --body ..  write a record
+  store move <id> --to <scope>            move a record between scopes (global|workspace|project), id/history intact
   store rm <id>                           remove a record (journaled)
   store log                               show store history (seq numbers shown)
   store undo                              undo last store change
