@@ -65,6 +65,14 @@ Use whatever download tool is present:
   ```
   (or `gh release download ... --output "$dir\projx-engine.exe"`).
 
+**Pin a specific version (optional).** The commands above fetch the LATEST
+release — that is the default and what you usually want. To install a SPECIFIC
+version instead, swap `releases/latest/download/<asset>` for
+`releases/download/<tag>/<asset>` — e.g.
+`https://github.com/SirNiklas9/projx-engine/releases/download/v0.3.0/projx-engine_windows_amd64.exe`
+(with `gh`, pass the tag: `gh release download <tag> --repo SirNiklas9/projx-engine …`).
+Only pin when you deliberately want an older/fixed build; otherwise stay on latest.
+
 If the download 404s, the latest release has no binary for this platform yet —
 tell the user a release with prebuilt binaries must be published first (assets
 `projx-engine_linux_amd64` and `projx-engine_windows_amd64.exe`). Do NOT fall
