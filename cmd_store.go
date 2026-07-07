@@ -125,7 +125,7 @@ func workspaceStorePath(absRoot string) string {
 
 func runStoreCmd(absRoot string, args []string) {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: store <get|list|query|commit|rm|log|undo|revert|cherry-pick|checkout|seed>")
+		fmt.Fprintln(os.Stderr, "usage: store <get|list|query|commit|move|rm|log|undo|revert|cherry-pick|checkout|seed>")
 		os.Exit(1)
 	}
 	sub, rest := args[0], args[1:]
@@ -138,6 +138,8 @@ func runStoreCmd(absRoot string, args []string) {
 		storeQuery(absRoot, rest)
 	case "commit":
 		storeCommit(absRoot, rest)
+	case "move":
+		storeMove(absRoot, rest)
 	case "seed":
 		storeSeed(absRoot, rest)
 	case "rm":
@@ -153,9 +155,90 @@ func runStoreCmd(absRoot string, args []string) {
 	case "checkout":
 		storeCheckout(absRoot, rest)
 	default:
-		fmt.Fprintf(os.Stderr, "unknown store subcommand %q (get|list|query|commit|rm|log|undo|revert|cherry-pick|checkout)\n", sub)
+		fmt.Fprintf(os.Stderr, "unknown store subcommand %q (get|list|query|commit|move|rm|log|undo|revert|cherry-pick|checkout)\n", sub)
 		os.Exit(1)
 	}
+}
+
+// physicalFor returns the underlying single-file store that OWNS a scope's level,
+// matching the composite's write routing (project→project store, workspace→the
+// workspace store or your store when there is none, global→your store). `store move`
+// uses this to relocate a record between physical files PRECISELY — the composite
+// Delete removes an id from every level at once, so a move must delete from the
+// source file directly, not through the Workspace.
+func (p *projectStore) physicalFor(s store.Scope) store.Store {
+	switch s.Owner() {
+	case "project":
+		return p.project
+	case "workspace":
+		if p.space != nil {
+			return p.space
+		}
+	}
+	return p.yours
+}
+
+// storeMove relocates a record to a different SCOPE without recreating it: the id,
+// kind, key, and body are preserved; only Scope changes and the row physically moves
+// to the file owning the new level (project store ↔ your global/workspace store). This
+// is the "rebase" the store lacked — promote a project convention to global, or demote
+// a global one to a single project, keeping ONE record with its history intact instead
+// of delete+recreate. Human-only: enforceAgentContext refuses it under agent context
+// (cross-scope promotion is the human's call; agents write project scope).
+func storeMove(absRoot string, args []string) {
+	// The id is the first positional; the stdlib flag parser stops at the first
+	// non-flag arg, so pull the id off BEFORE parsing --to/--by from the remainder.
+	if len(args) == 0 {
+		die("usage: store move <id> --to <global|workspace|project>")
+	}
+	id := args[0]
+	fs := flag.NewFlagSet("store move", flag.ExitOnError)
+	toFlag := fs.String("to", "", "destination scope: global|workspace|project (required)")
+	byFlag := fs.String("by", "ui", "actor: ui|agent")
+	_ = fs.Parse(args[1:])
+	if strings.TrimSpace(*toFlag) == "" {
+		die("--to <scope> is required")
+	}
+	to, err := parseScopeName(*toFlag)
+	if err != nil {
+		die("%v", err)
+	}
+
+	st := openStore(absRoot)
+	defer st.Close()
+
+	cur, ok := st.Get(id)
+	if !ok {
+		fmt.Fprintf(os.Stderr, "not found: %s\n", id)
+		os.Exit(1)
+	}
+	if cur.Scope == to {
+		fmt.Printf("%s is already %s — nothing to move\n", id, to)
+		return
+	}
+	// Refuse moving TO a workspace level that doesn't exist rather than silently
+	// landing the record in your global file (the composite's fallback-up behaviour).
+	if to == store.ScopeWorkspace && st.space == nil {
+		die("not in a workspace (no .projx-workspace ancestor) — cannot move to workspace scope")
+	}
+
+	moved := cur
+	moved.Scope = to
+	dst := st.physicalFor(to)
+	src := st.physicalFor(cur.Scope)
+	if err := dst.Put(moved); err != nil {
+		die("move: put %s: %v", id, err)
+	}
+	// Delete the original copy from ITS file only. Skip when source and destination
+	// resolve to the same physical file (e.g. workspace↔global with no workspace store):
+	// the Put above already overwrote the row in place, so deleting would drop it.
+	if src != dst {
+		if err := src.Delete(id); err != nil {
+			die("move: delete old %s: %v", id, err)
+		}
+	}
+	recordStoreOp(absRoot, "move", *byFlag, &cur, &moved)
+	fmt.Printf("moved %s: %s → %s\n", id, cur.Scope, to)
 }
 
 func storeGet(absRoot string, args []string) {

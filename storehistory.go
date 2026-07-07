@@ -20,7 +20,7 @@ import (
 type storeRevision struct {
 	Seq    int           `json:"seq"`
 	Time   string        `json:"time"`
-	Op     string        `json:"op"` // "put" | "delete" | "undo" | "revert" | "cherry-pick"
+	Op     string        `json:"op"` // "put" | "delete" | "move" | "undo" | "revert" | "cherry-pick"
 	ID     string        `json:"id"`
 	Kind   string        `json:"kind"`
 	Key    string        `json:"key"`
@@ -105,6 +105,21 @@ func undoLastStore(root string, st store.Store) (storeRevision, bool) {
 			}
 		case "delete":
 			if r.Before != nil {
+				_ = st.Put(*r.Before)
+			}
+		case "move":
+			// A move relocated the record between physical files (old scope → new
+			// scope). The generic put-inverse can't express that — it would restore
+			// the old copy but leave the relocated one behind. Undo precisely: drop
+			// the relocated copy from its file, restore the original to its file. This
+			// needs the per-file handles, so type-assert to *projectStore; fall back
+			// to a best-effort restore if some other Store impl is ever passed.
+			if pj, ok := st.(*projectStore); ok && r.Before != nil {
+				if r.After != nil {
+					_ = pj.physicalFor(r.After.Scope).Delete(r.ID)
+				}
+				_ = pj.physicalFor(r.Before.Scope).Put(*r.Before)
+			} else if r.Before != nil {
 				_ = st.Put(*r.Before)
 			}
 		}
