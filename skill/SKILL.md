@@ -14,47 +14,82 @@ ProjX is a single self-contained binary (git/fossil model: it runs when invoked
 and exits — no daemon). It floats: its scope follows what you touch. There are
 two things to set up, and they are independent.
 
-Reference the binary by its install path — `~/.local/bin/projx-engine` — so PATH
-never needs configuring and the same steps work on any machine.
+This is a runbook for YOU, the AI. You install and drive the binary yourself,
+ADAPTING to the operating system — do NOT assume a POSIX shell is available (the
+target machine is often Windows). There are TWO primary prebuilt binaries —
+**Linux** and **Windows** — published on the latest GitHub release of the public
+repo `SirNiklas9/projx-engine` (macOS optional).
 
 ## 1. GLOBAL — bootstrap once per machine (idempotent)
 
-Ensure ProjX is bootstrapped globally. This is safe to re-run; it only adds
-what's missing.
+First, check whether the binary is already installed and runnable. Try the
+expected path/name for the OS (see the table below); if `projx-engine` (or
+`projx-engine.exe`) runs, skip straight to the bootstrap command:
 
-```sh
-~/.local/bin/projx-engine init --global
+```
+projx-engine init --global
 ```
 
-This merges the ProjX lifecycle hook into `~/.claude/settings.json` (preserving
+That merges the ProjX lifecycle hook into `~/.claude/settings.json` (preserving
 any hooks you already have), seeds the global-scope floor (working-protocol +
 secrets-by-codename conventions + off-limits gate rules), and installs this
-skill. It does NOT reinstall the binary and never clobbers existing hooks.
+skill. It is idempotent, never clobbers existing hooks, and does NOT reinstall
+the binary.
 
-If `~/.local/bin/projx-engine` doesn't exist, INSTALL it by DOWNLOADING the
-prebuilt release binary — do NOT build from source:
+### If the binary is NOT installed — install it yourself, per OS
 
-- Run the installer (fetches the binary for this OS/arch from the latest release,
-  then runs the bootstrap above):
-  ```sh
-  curl -fsSL https://raw.githubusercontent.com/SirNiklas9/projx-engine/main/install.sh | sh
+Detect the OS, then do the three steps for that OS. Download the PREBUILT binary
+from the latest release — do NOT build from source.
+
+**Step A — detect OS.** Windows vs Linux/macOS. (In this harness: check the
+platform, or run `uname -s` where a shell exists; on Windows use PowerShell.)
+
+**Step B — download the right asset** from the latest release of
+`github.com/SirNiklas9/projx-engine`. Pick by OS/arch:
+
+| OS | Asset name | Install path | Make runnable |
+|---|---|---|---|
+| Linux (x86_64) | `projx-engine_linux_amd64` | `~/.local/bin/projx-engine` | `chmod +x` |
+| Linux (arm64) | `projx-engine_linux_arm64` | `~/.local/bin/projx-engine` | `chmod +x` |
+| Windows (x86_64) | `projx-engine_windows_amd64.exe` | `%LOCALAPPDATA%\projx\projx-engine.exe` (or `~/.local/bin/projx-engine.exe` under Git Bash) | already executable |
+| macOS (optional) | `projx-engine_darwin_amd64` / `_arm64` | `~/.local/bin/projx-engine` | `chmod +x` |
+
+Use whatever download tool is present:
+
+- **Linux/macOS:** `gh release download --repo SirNiklas9/projx-engine --pattern <asset> --output <path>`, or
+  `curl -fsSL https://github.com/SirNiklas9/projx-engine/releases/latest/download/<asset> -o <path>`.
+- **Windows (PowerShell):**
+  ```powershell
+  $dir = "$env:LOCALAPPDATA\projx"; New-Item -ItemType Directory -Force $dir | Out-Null
+  Invoke-WebRequest -Uri "https://github.com/SirNiklas9/projx-engine/releases/latest/download/projx-engine_windows_amd64.exe" -OutFile "$dir\projx-engine.exe"
   ```
-  Or, if the `projx-engine` repo is already on this machine, run its `install.sh`.
-- The installer downloads the asset `projx-engine_<os>_<arch>` (`.exe` on Windows)
-  from the latest release of the public repo `github.com/SirNiklas9/projx-engine`
-  to `~/.local/bin/projx-engine` and marks it executable — via `gh release
-  download` or `curl` of the release asset URL.
-- If the download 404s, the latest release has no binary for this platform yet:
-  tell the user a release with prebuilt binaries must be published first (asset
-  `projx-engine_<os>_<arch>`). Do NOT fall back to building from source.
+  (or `gh release download ... --output "$dir\projx-engine.exe"`).
+
+If the download 404s, the latest release has no binary for this platform yet —
+tell the user a release with prebuilt binaries must be published first (assets
+`projx-engine_linux_amd64` and `projx-engine_windows_amd64.exe`). Do NOT fall
+back to building from source.
+
+**Step C — make it runnable + reachable.** On Unix, `chmod +x` the file and make
+sure `~/.local/bin` is on PATH. On Windows, add the install dir to PATH (or just
+invoke it by its absolute path — that always works). Then run the bootstrap:
+
+```
+projx-engine init --global
+```
+
+> Unix-only convenience: `curl -fsSL https://raw.githubusercontent.com/SirNiklas9/projx-engine/main/install.sh | sh`
+> does Steps A–C + bootstrap in one line. It is a shell script, so it is NOT the
+> cross-platform path — on Windows (no guaranteed shell) do the AI-driven steps
+> above instead.
 
 ## 2. PROJECT / WORKSPACE — initialize on demand
 
-To make the CURRENT directory a ProjX project (only when the user asks), run
-from the project root:
+To make the CURRENT directory a ProjX project (only when the user asks), run from
+the project root (use the OS-appropriate path/name for the binary):
 
-```sh
-~/.local/bin/projx-engine --root . init
+```
+projx-engine --root . init
 ```
 
 This installs the project store + code map + `/projx:*` slash commands + the
