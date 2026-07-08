@@ -13,6 +13,26 @@ func gateDeniedPath(s store.Store, path string) (pattern string, denied bool) {
 	return store.GateDenied(s, path)
 }
 
+// bashAttemptsSelfAuthorize reports whether a Bash command tries to self-authorize an
+// override — either by running `projx-engine override …` or by flipping the delegation
+// flag `setting/override-authority`. The hook denies these when the human hasn't
+// delegated, so the AI cannot grant its own bypass. Coarse substring match on purpose
+// (over-matching only forces the human to run it — the safe direction).
+func bashAttemptsSelfAuthorize(cmd string) bool {
+	c := strings.ToLower(cmd)
+	if c == "" {
+		return false
+	}
+	if strings.Contains(c, "override-authority") {
+		return true // changing the delegation flag itself
+	}
+	if strings.Contains(c, "override") &&
+		(strings.Contains(c, "projx-engine") || strings.Contains(c, "projx_engine")) {
+		return true // running the override subcommand
+	}
+	return false
+}
+
 // bashShellSeps splits a shell command into candidate tokens: whitespace plus the
 // metacharacters that separate words/redirections/assignments. Coarse on purpose —
 // we only need the path-shaped operands, and over-tokenizing is harmless (a token

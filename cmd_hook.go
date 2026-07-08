@@ -151,6 +151,15 @@ func handleHook(absRoot string, input []byte) (stdout, stderr string, code int) 
 		}
 		defer st.Close()
 
+		// Override authority is DELEGATED, never self-granted. The AI reaches the engine
+		// through this tool hook; a human runs it in their own terminal (which does not).
+		// So: block any AI-initiated attempt to run `override` OR to flip the delegation
+		// flag itself, UNLESS the human has already delegated (setting/override-authority
+		// on). This is what stops the AI from writing its own permission slip.
+		if bashAttemptsSelfAuthorize(ev.ToolInput.Command) && !store.OverrideAuthorityOn(st) {
+			return "", "ProjX: override authority is not delegated. The AI may REQUEST an override but cannot grant its own. Ask the human to authorize — they delegate with `projx-engine store commit --kind gate-rule --key setting/override-authority --body on`, or run the `override` themselves. (This block is by design.)", 2
+		}
+
 		if store.IsMutatingTool(ev.ToolName) && os.Getenv("PROJX_ROLE") != "worker" {
 			if store.DispatcherModeOn(st) {
 				// Tier is DATA: soft = overridable with a logged reason (B); a project may
@@ -163,7 +172,7 @@ func handleHook(absRoot string, input []byte) (stdout, stderr string, code int) 
 					_, allowed = consumeOverride(storeRoot, "dispatcher-mode")
 				}
 				if !allowed {
-					hint := "override once with a reason: `projx-engine override dispatcher-mode --reason \"<why>\"`."
+					hint := "ask the human to authorize an override (they delegate with `store commit --kind gate-rule --key setting/override-authority --body on`, then `projx-engine override dispatcher-mode --reason \"<why>\"` proceeds once)."
 					if !soft {
 						hint = "this rule is HARD here — it cannot be overridden."
 					}

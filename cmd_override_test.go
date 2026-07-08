@@ -104,6 +104,55 @@ func TestDispatcherModeHardForbidsOverride(t *testing.T) {
 	}
 }
 
+// TestOverrideAuthorityDelegation covers the core rule: the AI cannot self-authorize
+// an override. An AI-initiated `override` (or an attempt to flip the delegation flag)
+// via the Bash tool is blocked until the human delegates by setting the flag on.
+func TestOverrideAuthorityDelegation(t *testing.T) {
+	t.Setenv("PROJX_YOURS_DIR", t.TempDir())
+	root := t.TempDir()
+
+	runOverride := []byte(`{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"projx-engine override dispatcher-mode --reason x"}}`)
+	flipFlag := []byte(`{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"projx-engine store commit --kind gate-rule --key setting/override-authority --body on"}}`)
+
+	// Not delegated → both blocked.
+	if _, _, code := handleHook(root, runOverride); code != 2 {
+		t.Errorf("AI override without delegation: got %d, want 2 (blocked)", code)
+	}
+	if _, _, code := handleHook(root, flipFlag); code != 2 {
+		t.Errorf("AI flipping delegation flag: got %d, want 2 (blocked)", code)
+	}
+
+	// Human delegates (direct store write = out-of-band, no hook).
+	st := openStore(root)
+	_ = st.Put(store.Record{ID: "gate-rule/setting/override-authority", Kind: store.KGateRule,
+		Scope: store.ScopeProject, Key: store.SettingOverrideAuthority, Body: "on"})
+	st.Close()
+
+	// Now the AI-initiated override passes the authority guard.
+	if _, _, code := handleHook(root, runOverride); code != 0 {
+		t.Errorf("AI override after delegation: got %d, want 0 (allowed)", code)
+	}
+}
+
+func TestBashAttemptsSelfAuthorize(t *testing.T) {
+	yes := []string{
+		"projx-engine override dispatcher-mode --reason x",
+		"projx-engine store commit --kind gate-rule --key setting/override-authority --body on",
+		"PROJX_SESSION=1 projx-engine override commit-style --reason y",
+	}
+	no := []string{"ls -la", "go test ./...", "echo override is a word", "git commit -m 'override'"}
+	for _, c := range yes {
+		if !bashAttemptsSelfAuthorize(c) {
+			t.Errorf("expected %q to be a self-authorize attempt", c)
+		}
+	}
+	for _, c := range no {
+		if bashAttemptsSelfAuthorize(c) {
+			t.Errorf("did NOT expect %q to be flagged", c)
+		}
+	}
+}
+
 // TestConsumeOverride unit-tests the grant lifecycle directly.
 func TestConsumeOverride(t *testing.T) {
 	root := t.TempDir()

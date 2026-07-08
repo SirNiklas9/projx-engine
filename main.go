@@ -212,6 +212,9 @@ Real commands:
   store list [--kind <name>] [--scope ..]  list records
   store commit --kind .. --key .. --body ..  write a record
   store move <id> --to <scope>            move a record between scopes (global|workspace|project), id/history intact
+  store patch <file|dir> [--dry-run]      apply a migration/patch manifest (TOML: raw sql +
+                                            record set/put/delete); idempotent, journaled.
+                                            No arg lists patches already applied.
   store rm <id>                           remove a record (journaled)
   store log                               show store history (seq numbers shown)
   store undo                              undo last store change
@@ -298,8 +301,6 @@ func enforceAgentContext(cmd string, rest []string) {
 		}
 	case "verify", "version":
 		// Read-only — allowed.
-	case "override":
-		// Soft-rule reasoned override — agent-safe (cannot touch HARD rules; logged).
 	case "hook":
 		// The Claude Code lifecycle bridge. It is the trusted harness integration
 		// (not one of the agent's own tools) and self-unsets PROJX_AGENT_CONTEXT, so
