@@ -211,6 +211,9 @@ Real commands:
                                             ~/.claude/settings.json (preserving other hooks) + the
                                             skill. Keeps stores + secrets; --purge-store drops the
                                             global store (never secrets). Binary left in place.
+  init --workspace                        Make --root a multi-repo WORKSPACE: create the
+                                            .projx-workspace marker + store whose records compose
+                                            into every repo beneath it. Idempotent.
   init --global                           One-time per-machine bootstrap: merge the ProjX lifecycle
                                             hook into ~/.claude/settings.json (preserving existing
                                             hooks), seed the global-scope floor, install the projx

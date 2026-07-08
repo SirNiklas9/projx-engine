@@ -105,6 +105,12 @@ func runInitCmd(absRoot string, args []string) {
 			runGlobalBootstrap()
 			return
 		}
+		if a == "--workspace" {
+			// Make --root a multi-repo WORKSPACE: a .projx-workspace marker + store whose
+			// records compose into every repo beneath it. Distinct from a project init.
+			runWorkspaceInit(absRoot)
+			return
+		}
 		if a == "--force" {
 			continue // retained for compatibility; the connector no longer writes a hook file
 		}

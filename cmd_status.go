@@ -73,6 +73,15 @@ func runStatusCmd(absRoot string, _ []string) {
 		fmt.Printf("  secrets: %d sealed (codenames only)\n", len(sst.Names()))
 	}
 
+	// ── workspace (if this root is under a .projx-workspace) ─────────────────
+	if wp := workspaceStorePath(absRoot); wp != "" {
+		if ws, err := store.Open(wp); err == nil {
+			n := len(ws.List(store.InScope(store.ScopeWorkspace)))
+			fmt.Printf("\nWorkspace: active → %s  (%d record(s))\n", filepath.Dir(wp), n)
+			ws.Close()
+		}
+	}
+
 	// ── current project ──────────────────────────────────────────────────────
 	if _, err := os.Stat(filepath.Join(absRoot, ".projx")); err != nil {
 		fmt.Printf("\nProject: not a ProjX project here (%s)\n  run `projx-engine --root . init` to enable\n", absRoot)
