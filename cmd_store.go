@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -328,9 +329,20 @@ func storeQuery(absRoot string, args []string) {
 
 	keyLower := strings.ToLower(*keyFlag)
 	textLower := strings.ToLower(*textFlag)
+	// The search TERM is the positional argument(s) — this is what `store query "winfsp"`
+	// passes. Previously it was ignored (so query returned the whole store); now it
+	// filters + ranks. --key/--text remain explicit hard filters.
+	term := strings.ToLower(strings.TrimSpace(strings.Join(fs.Args(), " ")))
+	tokens := strings.Fields(term)
 
 	st := openStore(absRoot)
 	defer st.Close()
+
+	type scored struct {
+		r     store.Record
+		score int
+	}
+	var hits []scored
 	for _, r := range st.List(f) {
 		if keyLower != "" && !strings.Contains(strings.ToLower(r.Key), keyLower) {
 			continue
@@ -338,7 +350,51 @@ func storeQuery(absRoot string, args []string) {
 		if textLower != "" && !strings.Contains(strings.ToLower(r.Body), textLower) {
 			continue
 		}
-		fmt.Printf("%s\t[%s/%s]\t%s\t%s\n", r.ID, r.Kind.String(), r.Scope.String(), r.Key, oneLine(r.Body))
+		score := 0
+		if term != "" {
+			kL, bL := strings.ToLower(r.Key), strings.ToLower(r.Body)
+			if strings.Contains(kL, term) {
+				score += 8 // whole-term hit in the key ranks highest
+			}
+			for _, tok := range tokens {
+				if strings.Contains(kL, tok) {
+					score += 5
+				}
+				if strings.Contains(bL, tok) {
+					score += 2
+				}
+			}
+			if score == 0 {
+				continue // term given but no match → drop (this is the real filtering)
+			}
+		}
+		hits = append(hits, scored{r, score})
+	}
+
+	// Rank: score desc when a term was given, then most-recent first; stable by ID.
+	sort.SliceStable(hits, func(i, j int) bool {
+		if term != "" && hits[i].score != hits[j].score {
+			return hits[i].score > hits[j].score
+		}
+		if hits[i].r.UpdatedAt != hits[j].r.UpdatedAt {
+			return hits[i].r.UpdatedAt > hits[j].r.UpdatedAt
+		}
+		return hits[i].r.ID < hits[j].r.ID
+	})
+
+	const cap = 40
+	shown := hits
+	if len(shown) > cap {
+		shown = shown[:cap]
+	}
+	for _, h := range shown {
+		fmt.Printf("%s\t[%s/%s]\t%s\t%s\n", h.r.ID, h.r.Kind.String(), h.r.Scope.String(), h.r.Key, oneLine(h.r.Body))
+	}
+	if len(hits) > cap {
+		fmt.Printf("… %d more (refine the query or use `store list`)\n", len(hits)-cap)
+	}
+	if term != "" && len(hits) == 0 {
+		fmt.Printf("(no records match %q)\n", term)
 	}
 }
 
