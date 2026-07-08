@@ -24,7 +24,20 @@ repo `SirNiklas9/projx-engine` (macOS optional).
 
 First, check whether the binary is already installed and runnable. Try the
 expected path/name for the OS (see the table below); if `projx-engine` (or
-`projx-engine.exe`) runs, skip straight to the bootstrap command:
+`projx-engine.exe`) runs, **check for an update before bootstrapping**:
+
+```
+projx-engine version --check
+```
+
+If the last line reads `update: available vX -> vY`, the installed binary is
+stale — download the latest asset (Step B below) and replace it, then continue.
+Do the swap **safely**: download to a temp file first, then move it over the
+existing binary. On Windows a running `.exe` cannot be overwritten in place, so
+the move must happen while the binary is NOT executing (write to
+`projx-engine.exe.new`, then `Move-Item -Force` over `projx-engine.exe`). If the
+check reports `up to date` (or the network check fails), skip straight to the
+bootstrap command:
 
 ```
 projx-engine init --global
