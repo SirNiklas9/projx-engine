@@ -79,6 +79,60 @@ func TestUninstallHookRoundtrip(t *testing.T) {
 	}
 }
 
+// TestMergeSelfHealsStaleHook proves a re-run of init repairs a stale/broken ProjX hook
+// command (the Windows path bug) instead of leaving it — no duplicate, user hooks intact.
+func TestMergeSelfHealsStaleHook(t *testing.T) {
+	dir := t.TempDir()
+	settings := filepath.Join(dir, "settings.json")
+	seed := map[string]any{
+		"hooks": map[string]any{
+			// a STALE ProjX hook (old broken path form) + a user's own hook on the same event
+			"SessionStart": []any{
+				map[string]any{"hooks": []any{map[string]any{"type": "command", "command": "~/.local/bin/projx-engine hook", "timeout": 30}}},
+			},
+			"PreToolUse": []any{
+				map[string]any{"matcher": "Bash", "hooks": []any{map[string]any{"type": "command", "command": "my-linter", "timeout": 5}}},
+			},
+		},
+	}
+	data, _ := json.MarshalIndent(seed, "", "  ")
+	_ = os.WriteFile(settings, data, 0o644)
+
+	if _, _, err := mergeGlobalHook(settings); err != nil {
+		t.Fatal(err)
+	}
+
+	root := map[string]any{}
+	final, _ := os.ReadFile(settings)
+	_ = json.Unmarshal(final, &root)
+	hooks := root["hooks"].(map[string]any)
+
+	// SessionStart: exactly ONE group, carrying the CURRENT command (not the stale one).
+	ss := hooks["SessionStart"].([]any)
+	if len(ss) != 1 {
+		t.Fatalf("SessionStart has %d groups, want 1 (stale should be replaced, not duplicated)", len(ss))
+	}
+	if cmd := projxGroupCommand(ss[0]); cmd == "~/.local/bin/projx-engine hook" || cmd != projxHookCommand() {
+		t.Errorf("SessionStart command not refreshed: %q", cmd)
+	}
+	// PreToolUse: the user's linter survives, and a ProjX hook was added.
+	var sawLinter, sawProjx bool
+	for _, g := range hooks["PreToolUse"].([]any) {
+		if projxGroupCommand(g) == "my-linter" {
+			sawLinter = true
+		}
+		if groupIsProjx(g) {
+			sawProjx = true
+		}
+	}
+	if !sawLinter {
+		t.Error("user's my-linter hook was lost")
+	}
+	if !sawProjx {
+		t.Error("ProjX hook not added to PreToolUse")
+	}
+}
+
 func containsProjx(t *testing.T, data []byte) bool {
 	t.Helper()
 	var root map[string]any

@@ -190,23 +190,32 @@ func mergeGlobalHook(settingsPath string) (added, skipped []string, err error) {
 		hooks = map[string]any{}
 	}
 
+	want := projxHookCommand()
 	changed := false
 	for _, s := range projxHookSpecs {
 		arr, _ := hooks[s.event].([]any)
-		if hookGroupsHaveProjx(arr) {
+		// SELF-HEAL: drop any ProjX hook group whose command differs from the current one
+		// (e.g. an old install's broken/stale path), and detect whether the CURRENT command
+		// is already present. This makes a re-run of `init --global` REPAIR a stale hook,
+		// not just skip it.
+		kept, hasCurrent, dropped := pruneStaleProjxGroups(arr, want)
+		if hasCurrent && !dropped {
 			skipped = append(skipped, s.event)
-			continue
+			continue // already up to date, untouched
 		}
-		group := map[string]any{
-			"hooks": []any{
-				map[string]any{"type": "command", "command": projxHookCommand(), "timeout": s.timeout},
-			},
+		if !hasCurrent {
+			group := map[string]any{
+				"hooks": []any{
+					map[string]any{"type": "command", "command": want, "timeout": s.timeout},
+				},
+			}
+			if s.matcher != "" {
+				group["matcher"] = s.matcher
+			}
+			kept = append(kept, group)
+			added = append(added, s.event) // added or refreshed
 		}
-		if s.matcher != "" {
-			group["matcher"] = s.matcher
-		}
-		hooks[s.event] = append(arr, group)
-		added = append(added, s.event)
+		hooks[s.event] = kept
 		changed = true
 	}
 
@@ -226,6 +235,39 @@ func mergeGlobalHook(settingsPath string) (added, skipped []string, err error) {
 		return nil, nil, err
 	}
 	return added, skipped, nil
+}
+
+// projxGroupCommand returns the command of a ProjX hook group's first inner hook ("" if
+// the shape is unexpected).
+func projxGroupCommand(g any) string {
+	if gm, ok := g.(map[string]any); ok {
+		if inner, _ := gm["hooks"].([]any); len(inner) > 0 {
+			if hm, ok := inner[0].(map[string]any); ok {
+				cmd, _ := hm["command"].(string)
+				return cmd
+			}
+		}
+	}
+	return ""
+}
+
+// pruneStaleProjxGroups returns arr with every ProjX hook group whose command differs from
+// `want` removed (stale/old-install hooks), reporting whether a group with the CURRENT
+// command remained and whether anything was dropped. Non-ProjX groups are always kept.
+func pruneStaleProjxGroups(arr []any, want string) (kept []any, hasCurrent, dropped bool) {
+	for _, g := range arr {
+		if !groupIsProjx(g) {
+			kept = append(kept, g)
+			continue
+		}
+		if projxGroupCommand(g) == want {
+			hasCurrent = true
+			kept = append(kept, g)
+		} else {
+			dropped = true // stale ProjX hook — drop it so a fresh one replaces it
+		}
+	}
+	return kept, hasCurrent, dropped
 }
 
 // hookGroupsHaveProjx reports whether any hook group in an event's array already carries

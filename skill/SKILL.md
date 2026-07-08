@@ -130,6 +130,28 @@ binary is left in place; per-project `.projx`/`.claude` files are left as-is.
 `uninstall --global` first requires a binary that has the command (v0.4.1+); the
 downloaded latest always does, so it can clean an older install's footprint.
 
+### Upgrade & REPAIR an existing install
+
+When the user says ProjX is FAILING (a hook error, "command not found", `/projx:*` or
+MCP tools not starting) OR `version --check` reports an update, do the FULL upgrade — a
+binary swap ALONE is not enough if an older version wrote a broken hook/MCP path into
+config on disk:
+
+1. Download the LATEST binary (Step B) OVER the existing one. On Windows a running `.exe`
+   can't be overwritten in place — write `projx-engine.exe.new`, then `Move-Item -Force`.
+2. Confirm the swap: `projx-engine version` shows the new version.
+3. `projx-engine init --global` — this SELF-HEALS: it refreshes a stale/broken ProjX hook
+   command to the current, correct form (older installs wrote a path bash couldn't run,
+   causing "command not found"). Re-running init IS the repair — no uninstall needed.
+4. Re-run `projx-engine --root <repo> init` in EACH ProjX project so its `.mcp.json` gets
+   the refreshed absolute binary path.
+5. `projx-engine status` — confirm the version and that the hook line reads
+   "OK — projx-engine resolves on PATH". Delete any stray `~/.projx` created by an
+   accidental init from the home dir.
+6. Tell the user to RESTART Claude Code to load the corrected hooks + MCP.
+
+NEVER delete `.projx` project stores or sealed secrets during a repair.
+
 ## 2. PROJECT / WORKSPACE — initialize on demand
 
 To make the CURRENT directory a ProjX project (only when the user asks), run from
@@ -145,8 +167,17 @@ expected and managed by ProjX. It does NOT install a per-project hook: the singl
 global hook from step 1 does all context injection (a per-project hook would
 double-inject).
 
-For a multi-repo WORKSPACE, create a `.projx-workspace/` directory on the parent
-folder that holds the repos; workspace-scoped records then compose from there.
+For a multi-repo WORKSPACE, run `init --workspace` from the parent folder that holds the
+repos:
+
+```
+projx-engine --root C:\repos init --workspace
+```
+
+That creates the `.projx-workspace/` marker + store and seeds a marker record;
+workspace-scoped records then compose into every repo beneath it. Confirm with
+`projx-engine --root <repo> store list --scope workspace`, and `status` reports the active
+workspace. (The old manual `mkdir .projx-workspace` still works but isn't needed.)
 
 ## The model — why two steps
 
