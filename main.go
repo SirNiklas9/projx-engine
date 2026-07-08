@@ -110,6 +110,8 @@ func main() {
 		runRouteCmd(absRoot, rest)
 	case "init":
 		runInitCmd(absRoot, rest)
+	case "uninstall":
+		runUninstallCmd(absRoot, rest)
 	case "seed":
 		runSeedCmd(absRoot, rest)
 	case "hook":
@@ -201,6 +203,10 @@ Real commands:
   init [stacks...] [--force]              ProjX-enable this project: install the Claude Code
                                             connector (/projx:* slash commands + MCP), seed the
                                             store, and index the code map. One command to turn it on.
+  uninstall --global [--purge-store]      Reverse of init --global: remove the ProjX hook from
+                                            ~/.claude/settings.json (preserving other hooks) + the
+                                            skill. Keeps stores + secrets; --purge-store drops the
+                                            global store (never secrets). Binary left in place.
   init --global                           One-time per-machine bootstrap: merge the ProjX lifecycle
                                             hook into ~/.claude/settings.json (preserving existing
                                             hooks), seed the global-scope floor, install the projx
