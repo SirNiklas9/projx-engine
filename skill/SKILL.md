@@ -104,6 +104,32 @@ projx-engine init --global
 > cross-platform path — on Windows (no guaranteed shell) do the AI-driven steps
 > above instead.
 
+### Uninstall, or CLEAN REINSTALL (machine-level, cross-platform)
+
+To remove ProjX, or to reinstall it cleanly, use the binary's OWN uninstall — no
+shell scripts, no jq, native on every OS including Windows:
+
+```
+projx-engine uninstall --global
+```
+
+This reverses `init --global`: it strips the ProjX lifecycle hook from
+`~/.claude/settings.json` (preserving every OTHER hook, writing a `.projx-bak`
+backup) and removes the installed skill. It KEEPS declared knowledge and secrets.
+Add `--purge-store` to also drop the per-user global store (never secrets). The
+binary is left in place; per-project `.projx`/`.claude` files are left as-is.
+
+**When the user asks to "clean old ProjX and install fresh" / "reinstall clean":**
+
+1. Download the LATEST binary (Step B above), overwriting any existing one.
+2. `projx-engine uninstall --global`   — clean the old hook + skill (add `--purge-store`
+   only if the user wants the global store gone too; NEVER remove secrets).
+3. `projx-engine init --global`        — fresh install of the latest.
+4. `projx-engine version`              — confirm the new version.
+
+`uninstall --global` first requires a binary that has the command (v0.4.1+); the
+downloaded latest always does, so it can clean an older install's footprint.
+
 ## 2. PROJECT / WORKSPACE — initialize on demand
 
 To make the CURRENT directory a ProjX project (only when the user asks), run from
