@@ -1,0 +1,13 @@
+{
+  "name": "projx",
+  "description": "ProjX marketplace — the ProjX plugin (skill + /projx:* commands).",
+  "version": "0.5.1",
+  "owner": { "name": "SirNiklas9" },
+  "plugins": [
+    {
+      "name": "projx",
+      "description": "ProjX self-install: the projx skill + /projx:* commands. On first use the skill downloads the projx-engine binary and runs `init --global` (global hook + floor + MCP).",
+      "source": "./plugin/projx"
+    }
+  ]
+}

@@ -1,26 +1,46 @@
-# install.ps1 — build + install the projx-engine CLI on Windows.
-# Produces projx-engine.exe (PowerShell/cmd need the .exe extension) and ensures
-# %USERPROFILE%\.local\bin is on your User PATH. Run from the repo:  .\install.ps1
+# install.ps1 — one-shot ProjX installer for Windows (no build from source).
+#
+# Downloads the prebuilt projx-engine.exe for this machine from the LATEST GitHub release
+# of SirNiklas9/projx-engine, installs it to %LOCALAPPDATA%\projx, puts that on your User
+# PATH, then runs the GLOBAL bootstrap (lifecycle hook + global floor + the projx skill).
+# Idempotent and self-healing — safe to re-run to upgrade + repair. It NEVER builds from
+# source (that's build.ps1, for developers).
+#
+# Usage (one line):
+#   irm https://raw.githubusercontent.com/SirNiklas9/projx-engine/main/install.ps1 | iex
+#   # or from a checkout:  .\install.ps1
+
 $ErrorActionPreference = 'Stop'
-Set-Location $PSScriptRoot
 
-$bin = Join-Path $HOME '.local\bin'
-New-Item -ItemType Directory -Force -Path $bin | Out-Null
+$repo   = 'SirNiklas9/projx-engine'
+$asset  = 'projx-engine_windows_amd64.exe'
+$dir    = Join-Path $env:LOCALAPPDATA 'projx'
+$exe    = Join-Path $dir 'projx-engine.exe'
+$url    = "https://github.com/$repo/releases/latest/download/$asset"
 
-$env:GOWORK = 'off'
-$exe = Join-Path $bin 'projx-engine.exe'
-# Stamp the version from git so the binary reports the real release, never a
-# hardcoded number. Falls back to 'dev' outside a git checkout.
-$ver = git describe --tags --always --dirty
-if ([string]::IsNullOrWhiteSpace($ver)) { $ver = 'dev' }
-go build -ldflags "-X main.version=$ver" -o $exe .
-Write-Host "installed $ver -> $exe"
+New-Item -ItemType Directory -Force -Path $dir | Out-Null
 
+# Download to a .new file, then move over the target — a RUNNING projx-engine.exe can't be
+# overwritten in place on Windows, so this makes upgrade-in-place safe too.
+$tmp = "$exe.new"
+Write-Host "downloading $asset (latest release)..."
+Invoke-WebRequest -Uri $url -OutFile $tmp
+Move-Item -Force $tmp $exe
+Write-Host "installed -> $exe"
+
+# Put the install dir on the User PATH (idempotent).
 $userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
-if ($userPath -notlike "*$bin*") {
-    [Environment]::SetEnvironmentVariable('PATH', "$userPath;$bin", 'User')
-    Write-Host "added $bin to your User PATH — open a NEW terminal to pick it up."
+if ($userPath -notlike "*$dir*") {
+    [Environment]::SetEnvironmentVariable('PATH', "$userPath;$dir", 'User')
+    $env:PATH = "$env:PATH;$dir"   # this session too
+    Write-Host "added $dir to your User PATH (open a NEW terminal for other apps to see it)."
 } else {
-    Write-Host "$bin already on PATH."
+    Write-Host "$dir already on PATH."
 }
-Write-Host "done. In a new terminal:  cd <your repo>;  projx-engine init"
+
+# Global bootstrap: hook + floor + skill. Self-heals a stale/broken hook on re-run.
+& $exe init --global
+
+Write-Host ""
+Write-Host "done. Verify with:  projx-engine status"
+Write-Host "Per project:        projx-engine init      (or say 'set up ProjX' / 'init ProjX here' in Claude Code)"

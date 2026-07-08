@@ -1,0 +1,8 @@
+{
+  "name": "projx",
+  "description": "ProjX — a declared-knowledge control plane for AI coding: a scoped, typed knowledge store; enforced off-limits gates; risk-aware model routing; and a verify gate that runs your real build/test. Bundles the projx skill + /projx:* commands. The skill fetches the projx-engine binary and runs `init --global` (hook + floor + MCP) on first use.",
+  "version": "0.5.1",
+  "author": { "name": "SirNiklas9" },
+  "homepage": "https://github.com/SirNiklas9/projx-engine",
+  "keywords": ["projx", "knowledge", "governance", "verify", "routing"]
+}
