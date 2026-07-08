@@ -38,6 +38,7 @@ type hookEvent struct {
 	ToolName  string `json:"tool_name"` // PreToolUse — which tool (Edit/Write/Read/…)
 	ToolInput struct {
 		FilePath string `json:"file_path"` // PreToolUse (Read/Edit/Write)
+		Command  string `json:"command"`   // PreToolUse (Bash) — the shell command line
 	} `json:"tool_input"`
 }
 
@@ -115,13 +116,13 @@ func handleHook(absRoot string, input []byte) (stdout, stderr string, code int) 
 		// Refresh the code map (silently), then inject the lean floor.
 		_, _, _, _ = syncMap(absRoot, nil)
 		if ctx := buildSessionContext(absRoot, sid, "", false); ctx != "" {
-			return wrapProjectContext(frame(ctx)), "", 0
+			return wrapProjectContext(frame(withOverrideNotice(absRoot, ctx))), "", 0
 		}
 		return "", "", 0
 
 	case "UserPromptSubmit":
 		if ctx := buildSessionContext(absRoot, sid, ev.Prompt, false); ctx != "" {
-			return wrapProjectContext(frame(ctx)), "", 0
+			return wrapProjectContext(frame(withOverrideNotice(absRoot, ctx))), "", 0
 		}
 		return "", "", 0
 
@@ -140,22 +141,41 @@ func handleHook(absRoot string, input []byte) (stdout, stderr string, code int) 
 		// the setting/dispatcher-mode record is affirmative, so it never blocks by default.
 		// Resolved from the TARGET's store: editing a file in a repo without dispatcher-mode
 		// is allowed even when cwd is a repo that has it on.
+		// FAIL CLOSED (doc/enforcement-follow-override-plan A): the gate opens the store
+		// non-fatally. If it can't open, we BLOCK (exit 2) instead of crashing with exit 1
+		// — which Claude Code treats as non-blocking, i.e. silently fail-open. The safety
+		// floor must deny when it cannot prove the action is allowed.
+		st, err := openStoreSafe(storeRoot)
+		if err != nil {
+			return "", fmt.Sprintf("ProjX gate: store unavailable (%v) — failing closed, action blocked.", err), 2
+		}
+		defer st.Close()
+
 		if store.IsMutatingTool(ev.ToolName) && os.Getenv("PROJX_ROLE") != "worker" {
-			st := openStore(storeRoot)
-			on := store.DispatcherModeOn(st)
-			st.Close()
-			if on {
-				return "", "ProjX dispatcher-mode: the trunk dispatches, it does not edit. Route this to a tier-agent — `projx-engine dispatch --run \"<task>\"` — or turn it off with `projx-engine store commit --kind gate-rule --key setting/dispatcher-mode --body off`.", 2
+			if store.DispatcherModeOn(st) {
+				// SOFT rule: deny by default, but honor a reasoned override grant (B).
+				if reason, ok := consumeOverride(storeRoot, "dispatcher-mode"); ok {
+					_ = reason // grant consumed; allow this one action to proceed
+				} else {
+					return "", "ProjX dispatcher-mode (soft): the trunk dispatches, it does not edit. Route this to a tier-agent — `projx-engine dispatch --run \"<task>\"` — or override once with a reason: `projx-engine override dispatcher-mode --reason \"<why>\"`.", 2
+				}
+			}
+		}
+
+		// HARD floor: off-limits gate patterns, matched two ways —
+		//   (1) the tool's file_path (Read/Edit/Write), and
+		//   (2) paths named inside a Bash command line (so `cat .env` can't slip past — C).
+		// Neither is overridable: secrets/off-limits are a wall, not a soft rule.
+		if pat, denied := gateDeniedPath(st, gateRelPath(storeRoot, absRoot, path)); path != "" && denied {
+			return "", fmt.Sprintf("ProjX gate: %q is off-limits by gate rule %q.", path, pat), 2
+		}
+		if cmd := strings.TrimSpace(ev.ToolInput.Command); cmd != "" {
+			if tok, pat, denied := bashHitsGate(st, storeRoot, absRoot, cmd); denied {
+				return "", fmt.Sprintf("ProjX gate: command references %q, off-limits by gate rule %q. Reading/printing secret material is denied.", tok, pat), 2
 			}
 		}
 		if path == "" {
-			return "", "", 0 // a matched tool with no file_path → allow
-		}
-		st := openStore(storeRoot)
-		pat, denied := gateDeniedPath(st, gateRelPath(storeRoot, absRoot, path))
-		st.Close()
-		if denied {
-			return "", fmt.Sprintf("ProjX gate: %q is off-limits by gate rule %q.", path, pat), 2
+			return "", "", 0 // a matched tool with no file_path → allow (gate already cleared)
 		}
 		// Auto-focus: touching a member repo's file focuses the session there, so the
 		// next turn's slice leads with that repo — and it SHIFTS when you edit another.
@@ -181,6 +201,23 @@ func handleHook(absRoot string, input []byte) (stdout, stderr string, code int) 
 	default:
 		return "", "", 0 // unknown event → no-op
 	}
+}
+
+// withOverrideNotice prepends a short banner listing recent soft-rule overrides so
+// every deviation the agent made surfaces to the human the next session — the
+// "overrides are never silent" half of doc/enforcement-follow-override-plan.
+func withOverrideNotice(absRoot, ctx string) string {
+	ovs := recentOverrides(absRoot, 5)
+	if len(ovs) == 0 {
+		return ctx
+	}
+	var b strings.Builder
+	b.WriteString("## Recent rule overrides (soft rules bypassed with a logged reason)\n")
+	for _, o := range ovs {
+		b.WriteString("- " + o + "\n")
+	}
+	b.WriteString("\n")
+	return b.String() + ctx
 }
 
 // wrapProjectContext frames injected store context as declarative REFERENCE DATA (not

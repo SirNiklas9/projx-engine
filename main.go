@@ -94,6 +94,8 @@ func main() {
 		runStoreCmd(absRoot, rest)
 	case "gate":
 		runGateCmd(absRoot, rest)
+	case "override":
+		runOverrideCmd(absRoot, rest)
 	case "verify":
 		runVerifyCmd(absRoot, rest)
 	case "verify-loop":
@@ -216,6 +218,10 @@ Real commands:
   store revert <seq>                      git-revert: invert a prior revision
   store cherry-pick <seq>                 re-apply a prior revision's effect
   store checkout <seq>                    read-only view of store state at seq
+  override <rule> --reason <why> [--ttl N] proceed past a SOFT rule once, with a logged
+                                            reason (soft: dispatcher-mode, confirm-before-push,
+                                            commit-style). HARD rules (secrets/off-limits) can't
+                                            be overridden.
   gate add <pattern>                      add a gate rule
   gate list                               list gate rules
   gate rm <id-or-pattern>                 remove a gate rule
@@ -292,6 +298,8 @@ func enforceAgentContext(cmd string, rest []string) {
 		}
 	case "verify", "version":
 		// Read-only — allowed.
+	case "override":
+		// Soft-rule reasoned override — agent-safe (cannot touch HARD rules; logged).
 	case "hook":
 		// The Claude Code lifecycle bridge. It is the trusted harness integration
 		// (not one of the agent's own tools) and self-unsets PROJX_AGENT_CONTEXT, so

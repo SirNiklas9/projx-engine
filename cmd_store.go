@@ -56,13 +56,25 @@ func yoursDir() string {
 // global+workspace records in the per-user yours store. The engine OWNS the
 // store; every face reads this same file.
 func openStore(absRoot string) *projectStore {
+	ps, err := openStoreSafe(absRoot)
+	if err != nil {
+		die("%v", err)
+	}
+	return ps
+}
+
+// openStoreSafe is openStore that returns an error instead of exiting. The gate
+// path (PreToolUse) uses this so a store-open failure can FAIL CLOSED (block the
+// action) rather than crash the hook with exit 1 — which Claude Code treats as
+// non-blocking, i.e. fail-OPEN. See doc/enforcement-follow-override-plan (A).
+func openStoreSafe(absRoot string) (*projectStore, error) {
 	projDir := filepath.Join(absRoot, ".projx")
 	if err := os.MkdirAll(projDir, 0o755); err != nil {
-		die("mkdir .projx: %v", err)
+		return nil, fmt.Errorf("mkdir .projx: %v", err)
 	}
 	project, err := store.Open(filepath.Join(projDir, "store.db"))
 	if err != nil {
-		die("open project store: %v", err)
+		return nil, fmt.Errorf("open project store: %v", err)
 	}
 	fallbackYours := filepath.Join(projDir, "yours.db") // project-local fallback
 	yoursPath := fallbackYours
@@ -84,7 +96,8 @@ func openStore(absRoot string) *projectStore {
 			yours, err = store.Open(fallbackYours)
 		}
 		if err != nil {
-			die("open yours store: %v", err)
+			_ = project.Close()
+			return nil, fmt.Errorf("open yours store: %v", err)
 		}
 	}
 	// Optional WORKSPACE level: a ".projx-workspace" folder on an ancestor of the repo
@@ -101,7 +114,7 @@ func openStore(absRoot string) *projectStore {
 	return &projectStore{
 		Workspace: store.NewComposite(yours, spaceIface, project),
 		project:   project, yours: yours, space: space,
-	}
+	}, nil
 }
 
 // workspaceStorePath walks UP from absRoot for a workspace marker — a ".projx-workspace"

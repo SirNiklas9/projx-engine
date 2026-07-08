@@ -13,6 +13,45 @@ func gateDeniedPath(s store.Store, path string) (pattern string, denied bool) {
 	return store.GateDenied(s, path)
 }
 
+// bashShellSeps splits a shell command into candidate tokens: whitespace plus the
+// metacharacters that separate words/redirections/assignments. Coarse on purpose —
+// we only need the path-shaped operands, and over-tokenizing is harmless (a token
+// that isn't off-limits simply doesn't match).
+func bashSplit(cmd string) []string {
+	return strings.FieldsFunc(cmd, func(r rune) bool {
+		switch r {
+		case ' ', '\t', '\n', '\r', ';', '|', '&', '<', '>', '(', ')', '=', '"', '\'', '`', ',':
+			return true
+		}
+		return false
+	})
+}
+
+// bashHitsGate scans a Bash command line for any operand that names an off-limits
+// path, closing the hole where `cat .env` (a Bash call, no file_path) bypassed the
+// secret gate entirely. Each token is tested in several normalized forms — as given,
+// store-relative, and by basename — so `.env`, `./secret/x`, `path/to/.env`, and
+// `~/.ssh/id_rsa` are all caught against `.env*`, `secret/**`, `**/*.key`, `**/.ssh/**`.
+// Returns the offending token, the matched pattern, and whether it was denied.
+func bashHitsGate(s store.Store, storeRoot, absRoot, cmd string) (token, pattern string, denied bool) {
+	for _, tok := range bashSplit(cmd) {
+		tok = strings.TrimSpace(tok)
+		if tok == "" || strings.HasPrefix(tok, "-") {
+			continue // flags aren't paths
+		}
+		for _, cand := range []string{
+			gateRelPath(storeRoot, absRoot, tok),
+			tok,
+			filepath.Base(tok),
+		} {
+			if pat, hit := store.GateDenied(s, cand); hit {
+				return tok, pat, true
+			}
+		}
+	}
+	return "", "", false
+}
+
 // targetStoreRoot resolves WHICH project's store governs an operation on path —
 // TARGET-based, not cwd-based (adr/scope-resolution-is-target-based). It walks UP from
 // the file being touched to the nearest ancestor directory that owns a ".projx"
