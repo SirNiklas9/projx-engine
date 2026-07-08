@@ -15,14 +15,28 @@ one-line anchor jump instead of a 25-file grep.
 
 ## Quick start — is it drag-and-drop?
 
-Almost. Two one-time steps, then one command per project.
+Almost. One-time install, then one command per project. You also need the `claude` CLI
+(Claude Code) — you already have it.
 
-**Once (install the binary):**
+**Install (one line, prebuilt — no build from source):**
 ```sh
-cd projx-engine && make install       # git-stamps the version, installs to ~/.local/bin
-# (Windows: .\install.ps1  —  raw builds work too but report version "dev")
+# Linux / macOS
+curl -fsSL https://raw.githubusercontent.com/SirNiklas9/projx-engine/main/install.sh | sh
+
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/SirNiklas9/projx-engine/main/install.ps1 | iex
 ```
-You also need the `claude` CLI (Claude Code) — you already have it.
+Each installer downloads the latest release binary, puts it on your `PATH`, and runs the
+global bootstrap (lifecycle hook + global floor + the projx skill). Idempotent and
+self-healing — re-run any time to upgrade and repair.
+
+**Or install as a Claude Code plugin:**
+```
+/plugin marketplace add SirNiklas9/projx-engine
+/plugin install projx@projx
+```
+The plugin bundles the projx skill + `/projx:*` commands; on first use the skill fetches
+the binary and runs `init --global` for you.
 
 **Per project (the "drag and drop"):**
 ```sh
@@ -42,8 +56,12 @@ From then on the SessionStart refresh keeps them indexed, and **focus auto-track
 repo you're editing** (edit `Evolution/…` → its context leads; jump to `Frontend/…` → it
 shifts). Override with `@focus <repo>` / `@unfocus`.
 
-To turn it on for a friend's existing project: they build the binary once, then run
+To turn it on for a friend's existing project: they run the one-line installer above, then
 `projx-engine init` in the repo. No config files to write by hand.
+
+> **Building from source** (contributors): `make install` git-stamps the version and installs
+> to `~/.local/bin` (Windows: `.\build.ps1`). The one-line installers above are the supported
+> path for everyone else.
 
 ---
 
@@ -200,14 +218,34 @@ as Pulp capabilities. See `cell/` and `host/`.
 ## Command reference
 
 ```
-projx-engine init [stacks…] [--force]   ProjX-enable a project (connector + seed + map)
-projx-engine map sync [repo dirs…]      index symbols (multi-repo workspace if dirs given)
-projx-engine seed apply|export [file]   bake / dump the declarative projx.seed.toml
-projx-engine store commit --kind K --key K/path --body "…"   add knowledge (Level −1)
-projx-engine store list [--kind …] | query <text> | get <id>
-projx-engine route <task> | route pin|floor <tier> | route clear pin|floor
-projx-engine run [--dry-run] <task>     route a task → deterministic op or agent tier
-projx-engine gate add <glob> | gate check <path>
-projx-engine context [--session <id>] [--task "…"]   print the injected context
-projx-engine hook                       Claude Code lifecycle handler (used by settings.json)
+Setup
+  projx-engine init [stacks…] [--force]   ProjX-enable a project (connector + seed + map)
+  projx-engine init --global              install the global lifecycle hook + floor + skill
+  projx-engine init --workspace           mark the current folder a multi-repo workspace
+  projx-engine uninstall [--global]       remove the connector (or the global hook + skill)
+  projx-engine status                     show install health: hook, skill, store, PATH, records
+  projx-engine version [--check]          print the version (--check compares the latest release)
+
+Knowledge
+  projx-engine map sync [repo dirs…]      index symbols (multi-repo workspace if dirs given)
+  projx-engine seed apply|export [file]   bake / dump the declarative projx.seed.toml
+  projx-engine store commit --kind K --key K/path --body "…"   add knowledge (Level −1)
+  projx-engine store list [--kind …] | query <text> | get <id>
+  projx-engine gate add <glob> | gate check <path>
+  projx-engine secret …                   manage secrets by codename (never the material)
+
+Work
+  projx-engine route <task> | route pin|floor <tier> | route clear pin|floor
+  projx-engine run [--dry-run] <task>     route one task → deterministic op or agent tier
+  projx-engine dispatch [--run] <message> decompose a multi-task message; route each; fan out
+  projx-engine verify [--no-build|--behavior-only]   boundaries + drift + real build/test gate
+  projx-engine override <rule> --reason … request a soft-rule override (human-delegated)
+  projx-engine context [--session <id>] [--task "…"]   print the injected context
+  projx-engine hook                       Claude Code lifecycle handler (used by settings.json)
 ```
+
+---
+
+## License
+
+[MIT](LICENSE) © 2026 SirNiklas9.
