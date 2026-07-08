@@ -218,7 +218,9 @@ func reportInitNextSteps() {
 	fmt.Println("  • /projx:route <task>      see the tier     • /projx:gate    list off-limits paths")
 	if !onPath {
 		self, _ := os.Executable()
-		fmt.Printf("\ninit: NOTE — `projx-engine` is not on your PATH. The hook expects it there, or set\n")
-		fmt.Printf("      PROJX_ENGINE_BIN to this binary: %s\n", self)
+		fmt.Printf("\ninit: NOTE — the ProjX hook runs `projx-engine hook` resolved from your PATH, but\n")
+		fmt.Printf("      projx-engine isn't on PATH yet, so the hook will fail until you fix that.\n")
+		fmt.Printf("      Add its directory to PATH (on Windows: the install dir to your User PATH),\n")
+		fmt.Printf("      or set PROJX_ENGINE_BIN=%s\n", self)
 	}
 }

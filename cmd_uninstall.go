@@ -167,7 +167,7 @@ func groupIsProjx(g any) bool {
 		if !ok {
 			continue
 		}
-		if cmd, _ := hm["command"].(string); strings.Contains(cmd, "projx-engine hook") {
+		if cmd, _ := hm["command"].(string); isProjxHookCmd(cmd) {
 			return true
 		}
 	}

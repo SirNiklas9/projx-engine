@@ -36,10 +36,22 @@ import (
 //go:embed skill/SKILL.md
 var projxSkillMD string
 
-// projxHookCommand is the exact command every ProjX lifecycle hook runs. Referenced
-// by its ~/.local/bin path so PATH never needs configuring (convention/standalone-
-// single-binary). The substring "projx-engine hook" is what idempotency detects.
-const projxHookCommand = "~/.local/bin/projx-engine hook"
+// projxHookCommand is the exact command every ProjX lifecycle hook runs. Claude Code
+// executes hooks through a shell (bash, even on Windows via Git Bash), so the command
+// must be BASH-SAFE and portable: a hardcoded Windows path (C:\…\projx-engine.exe) has
+// its backslashes stripped by bash and fails ("command not found"), and a ~/.local/bin
+// POSIX path is simply wrong on Windows. So we resolve the binary from PATH, with an
+// optional PROJX_ENGINE_BIN override, expanded by the shell at hook time. Works on Unix
+// and Windows alike (Git Bash finds projx-engine.exe on PATH). isProjxHookCmd detects it.
+const projxHookCommand = "${PROJX_ENGINE_BIN:-projx-engine} hook"
+
+// isProjxHookCmd reports whether a hook command string is a ProjX lifecycle hook. It
+// matches any command that runs projx-engine's `hook` subcommand — the current
+// PATH-resolved form, an explicit-path form, or a PROJX_ENGINE_BIN override — so
+// idempotency and uninstall detect every historical and current variant.
+func isProjxHookCmd(cmd string) bool {
+	return strings.Contains(cmd, "projx-engine") && strings.Contains(cmd, "hook")
+}
 
 // globalFloorOrigin tags the global-scope floor records this command seeds, distinct
 // from the project floor's "seed:floor".
@@ -214,7 +226,7 @@ func hookGroupsHaveProjx(groups []any) bool {
 			if !ok {
 				continue
 			}
-			if cmd, _ := hm["command"].(string); strings.Contains(cmd, "projx-engine hook") {
+			if cmd, _ := hm["command"].(string); isProjxHookCmd(cmd) {
 				return true
 			}
 		}

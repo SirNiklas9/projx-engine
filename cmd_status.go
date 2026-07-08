@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -44,7 +45,13 @@ func runStatusCmd(absRoot string, _ []string) {
 		claudeDir := filepath.Join(home, ".claude")
 		on, total := globalHookStatus(filepath.Join(claudeDir, "settings.json"))
 		if on > 0 {
-			fmt.Printf("  hook:    installed (%d/%d lifecycle events)\n", on, total)
+			// The hook runs `projx-engine hook` from PATH — verify it actually resolves,
+			// since a hook that can't find the binary fails silently on every event.
+			resolved := "OK — projx-engine resolves on PATH"
+			if _, lookErr := exec.LookPath("projx-engine"); lookErr != nil {
+				resolved = "⚠ projx-engine NOT on PATH — hook will FAIL (add to PATH or set PROJX_ENGINE_BIN)"
+			}
+			fmt.Printf("  hook:    installed (%d/%d events) — %s\n", on, total, resolved)
 		} else {
 			fmt.Println("  hook:    NOT installed  — run `projx-engine init --global`")
 		}
