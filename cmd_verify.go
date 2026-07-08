@@ -31,11 +31,17 @@ func runVerifyCmd(absRoot string, args []string) {
 			behaviorOnly = true
 		}
 	}
+	if verifyAll(absRoot, noBuild, behaviorOnly) {
+		os.Exit(1)
+	}
+	fmt.Println("verify: OK")
+}
 
+// verifyAll runs the verify checks (boundaries + drift + behavioral) and returns whether
+// ANY failed — without exiting, so callers like `dispatch --run` can gate on the result.
+func verifyAll(absRoot string, noBuild, behaviorOnly bool) (failed bool) {
 	st := openStore(absRoot)
 	defer st.Close()
-
-	failed := false
 
 	// ── 1. Boundaries ─────────────────────────────────────────────────────────
 	if !behaviorOnly {
@@ -81,10 +87,7 @@ func runVerifyCmd(absRoot string, args []string) {
 		}
 	}
 
-	if failed {
-		os.Exit(1)
-	}
-	fmt.Println("verify: OK")
+	return failed
 }
 
 // verifyCommand resolves the behavioral command: an explicit `setting/verify-cmd` override

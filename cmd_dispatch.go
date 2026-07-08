@@ -76,9 +76,25 @@ func runDispatchCmd(absRoot string, args []string) {
 	}
 
 	// FAN OUT — one agent per task, at its own tier, in order.
+	agentWork := false
 	for i, s := range steps {
 		fmt.Fprintf(os.Stderr, "\n── dispatch %d/%d [%s] %s\n", i+1, len(steps), stepTier(s.Decision), s.Task)
+		if s.Decision.Kind == "agent" {
+			agentWork = true
+		}
 		runOneDispatchStep(absRoot, s)
+	}
+
+	// AUTO-GATE — after agent work, run the verify gate (boundaries + drift + build/test)
+	// on the RESULT and gate on it. Reject-and-report to the human on failure: the change
+	// landed in the working tree but is flagged NOT verified, so it isn't silently trusted.
+	if agentWork {
+		fmt.Fprintln(os.Stderr, "\n── dispatch: verifying the result ──")
+		if verifyAll(absRoot, false, false) {
+			fmt.Fprintln(os.Stderr, "\ndispatch: ⚠ VERIFY FAILED — the dispatched change is NOT verified. Review and fix before relying on it.")
+			os.Exit(1)
+		}
+		fmt.Fprintln(os.Stderr, "dispatch: ✓ result verified (boundaries + drift + build/test).")
 	}
 }
 
