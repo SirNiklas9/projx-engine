@@ -446,7 +446,8 @@ func storeCommit(absRoot string, args []string) {
 		bp = &before
 	}
 
-	rec := store.Record{ID: recID, Kind: k, Scope: sc, Key: *keyFlag, Body: *bodyFlag}
+	rec := store.Record{ID: recID, Kind: k, Scope: sc, Key: *keyFlag, Body: *bodyFlag,
+		Provenance: store.ProvenanceFor(effectiveBy)} // human-confirmed (ui) | agent-asserted (agent)
 	if err := st.Put(rec); err != nil {
 		die("put: %v", err)
 	}
@@ -620,7 +621,14 @@ func parseScopeName(name string) (store.Scope, error) {
 
 // printRecord prints a record to stdout.
 func printRecord(r store.Record) {
-	fmt.Printf("id:    %s\nkind:  %s\nscope: %s\nkey:   %s\nbody:  %s\n", r.ID, r.Kind, r.Scope, r.Key, r.Body)
+	fmt.Printf("id:    %s\nkind:  %s\nscope: %s\nkey:   %s\n", r.ID, r.Kind, r.Scope, r.Key)
+	if r.Provenance != "" {
+		fmt.Printf("provenance: %s\n", r.Provenance)
+	}
+	if r.Enforcement != "" {
+		fmt.Printf("enforcement: %s\n", r.Enforcement)
+	}
+	fmt.Printf("body:  %s\n", r.Body)
 }
 
 // oneLine returns the first line of s, trimmed to ~80 chars.
