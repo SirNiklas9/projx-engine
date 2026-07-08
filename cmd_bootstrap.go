@@ -79,6 +79,13 @@ const globalFloorOrigin = "seed:global-floor"
 var globalFloorConventions = []store.SeedRec{
 	{"working-protocol", "You author and direct; ProjX implements, verifies, then commits. For real build work, say one line about what you're about to do before doing it. Prefer deterministic tools (verify, store, tests) over reasoning whenever a tool can do the job."},
 	{"secrets-by-codename", "Never read, edit, or print secret material. Reference secrets only by codename."},
+	{"read-before-acting", "Read the store contract first. The store is authoritative project knowledge — not any README or .md file. Never act before reading it."},
+	{"commit-what-you-learn", "When you decide or learn something durable, commit it to the store (convention/adr) — not a markdown file."},
+	{"verify-before-done", "Don't report a task complete until you've exercised the change and seen it work — tests green, or the affected flow driven end-to-end. \"Should work\" is not done; run it and confirm before you claim it."},
+	{"smallest-change-on-task", "Change only what the task needs. Don't refactor, rename, or reformat unrelated code — keep the diff small and reviewable. Note tangents; don't fold them in."},
+	{"fix-dont-disable", "Never delete, comment out, weaken, or skip a feature or test just to make something pass. Fix the root cause; if you can't, stop and report it rather than hide it."},
+	{"match-the-surroundings", "New code reads like the code around it — same naming, structure, and idioms. The existing code is the style guide."},
+	{"no-irreversible-ops-unprompted", "Never run destructive or outward-facing commands (force-push, hard reset, history rewrite, mass delete, publish, deploy) without explicit confirmation for that specific action."},
 }
 
 // globalFloorGates are the off-limits paths denied everywhere by default, seeded at
@@ -86,6 +93,7 @@ var globalFloorConventions = []store.SeedRec{
 var globalFloorGates = []store.SeedRec{
 	{"dotenv files", ".env*"},
 	{"private keys", "**/*.key"},
+	{"pem material", "**/*.pem"},
 	{"secrets dir", "secret/**"},
 	{"ssh material", "**/.ssh/**"},
 }

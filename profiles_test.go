@@ -31,12 +31,12 @@ func TestSeedFloorAndGo(t *testing.T) {
 		t.Fatal("seeded 0 records")
 	}
 
+	// Project floor is now project-specific only (dispatch-don't-mutate) + the go stack;
+	// universal conventions + off-limits gates live at GLOBAL scope and inherit down, so a
+	// bare project store no longer carries them.
 	convs := st.List(store.OfKind(store.KConvention))
-	if len(convs) < 5 { // 4 floor + 1 go
-		t.Fatalf("expected >=5 conventions, got %d", len(convs))
-	}
-	if gates := st.List(store.OfKind(store.KGateRule)); len(gates) < 4 {
-		t.Fatalf("expected >=4 gate rules, got %d", len(gates))
+	if len(convs) < 2 { // dispatch-don't-mutate + at least one go-stack convention
+		t.Fatalf("expected >=2 conventions, got %d", len(convs))
 	}
 	foundGo := false
 	for _, c := range convs {
@@ -48,13 +48,18 @@ func TestSeedFloorAndGo(t *testing.T) {
 		t.Error("go stack convention missing")
 	}
 
-	// The steering + gates are live in the agent preamble.
+	// The project-scope steering is live in the agent preamble.
 	pre := compileStorePreamble(st)
-	if !strings.Contains(pre, "secret/**") {
-		t.Error("gate rule not in preamble")
+	if !strings.Contains(pre, "DISPATCHER") {
+		t.Error("dispatch-don't-mutate steering not in preamble")
 	}
-	if !strings.Contains(pre, "Read this store contract first") {
-		t.Error("floor steering not in preamble")
+
+	// A project may declare its OWN gate; it must render (project-scope gates compound on
+	// top of the inherited global ones).
+	_ = st.Put(store.Record{ID: "gate-rule/proj-secret", Kind: store.KGateRule,
+		Scope: store.ScopeProject, Key: "project secrets", Body: "secret/**"})
+	if !strings.Contains(compileStorePreamble(st), "secret/**") {
+		t.Error("project-declared gate rule not in preamble")
 	}
 
 	// routing.json carries the three model tiers.
