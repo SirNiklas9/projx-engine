@@ -167,6 +167,8 @@ func DecideWithStore(s store.Store, task string, cfg Config, triage store.Triage
 	}
 
 	// ── 2. AGENT path: the DECIDER (precedence ladder) picks the tier ─────────
+	// The risk-floor (correctness-critical → deep-reasoning) is applied inside
+	// store.RouteDecide, so route/run/dispatch all get it consistently.
 	rd := store.RouteDecide(s, task, triage)
 	cmd := rd.Cmd // store KRoute tier-map wins if set…
 	if cmd == "" {
