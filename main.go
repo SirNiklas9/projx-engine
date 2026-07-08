@@ -90,6 +90,8 @@ func main() {
 	switch cmd {
 	case "version", "--version", "-v":
 		runVersionCmd(rest)
+	case "status":
+		runStatusCmd(absRoot, rest)
 	case "store":
 		runStoreCmd(absRoot, rest)
 	case "gate":
@@ -200,6 +202,8 @@ Usage:
 Real commands:
   version [--check]                       print the engine version + build revision
                                             --check: report if a newer release exists
+  status                                  overview: version, global hook/skill/store, and this
+                                            project's records, enforcement, gates, code-map
   init [stacks...] [--force]              ProjX-enable this project: install the Claude Code
                                             connector (/projx:* slash commands + MCP), seed the
                                             store, and index the code map. One command to turn it on.
@@ -302,7 +306,7 @@ func enforceAgentContext(cmd string, rest []string) {
 			// rm, undo, revert, cherry-pick, and anything unknown.
 			deny("store " + sub)
 		}
-	case "verify", "version":
+	case "verify", "version", "status":
 		// Read-only — allowed.
 	case "hook":
 		// The Claude Code lifecycle bridge. It is the trusted harness integration
