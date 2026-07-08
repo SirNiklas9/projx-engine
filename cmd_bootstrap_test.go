@@ -173,7 +173,7 @@ func TestMergeGlobalHookIdempotent(t *testing.T) {
 		for _, g := range v.([]any) {
 			inner, _ := g.(map[string]any)["hooks"].([]any)
 			for _, h := range inner {
-				if cmd, _ := h.(map[string]any)["command"].(string); cmd == projxHookCommand {
+				if cmd, _ := h.(map[string]any)["command"].(string); isProjxHookCmd(cmd) {
 					count++
 				}
 			}

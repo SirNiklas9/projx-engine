@@ -71,10 +71,25 @@ func mergeMCPServer(absRoot, name string, def map[string]any) (msg string, added
 	return fmt.Sprintf("MCP server %q registered → .mcp.json", name), true
 }
 
+// mcpBinaryPath resolves the projx-engine path for the MCP `command`: PROJX_ENGINE_BIN if
+// set, else this binary's absolute forward-slash path (selfBinaryPath). The MCP server is
+// spawned WITHOUT a shell, so unlike the hook there is no ${} expansion — the path is baked
+// at init. Shares selfBinaryPath with the hook so hook and MCP never point at different bins.
+func mcpBinaryPath() string {
+	if b := strings.TrimSpace(os.Getenv("PROJX_ENGINE_BIN")); b != "" {
+		return filepath.ToSlash(b)
+	}
+	return selfBinaryPath()
+}
+
 // installMCPConfig registers ProjX's own MCP server (store_query/route/gate_check/
 // impact/store_commit) — the agent-agnostic pull surface, additive to the hooks.
 func installMCPConfig(absRoot string) string {
-	msg, added := mergeMCPServer(absRoot, "projx", map[string]any{"command": "projx-engine", "args": []string{"mcp"}})
+	// The MCP server is spawned directly by the agent (no shell), so a bare "projx-engine"
+	// needs the binary on PATH — which a Windows install to %LOCALAPPDATA%\projx is NOT.
+	// Use the resolved absolute path (PROJX_ENGINE_BIN override, else this binary), the SAME
+	// path routine the hook uses, so the two can never disagree (see cmd_bootstrap.go).
+	msg, added := mergeMCPServer(absRoot, "projx", map[string]any{"command": mcpBinaryPath(), "args": []string{"mcp"}})
 	if added {
 		return msg + " (any MCP agent: store_query/route/gate_check/impact/store_commit)"
 	}

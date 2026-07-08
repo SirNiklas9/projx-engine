@@ -36,21 +36,38 @@ import (
 //go:embed skill/SKILL.md
 var projxSkillMD string
 
-// projxHookCommand is the exact command every ProjX lifecycle hook runs. Claude Code
-// executes hooks through a shell (bash, even on Windows via Git Bash), so the command
-// must be BASH-SAFE and portable: a hardcoded Windows path (C:\…\projx-engine.exe) has
-// its backslashes stripped by bash and fails ("command not found"), and a ~/.local/bin
-// POSIX path is simply wrong on Windows. So we resolve the binary from PATH, with an
-// optional PROJX_ENGINE_BIN override, expanded by the shell at hook time. Works on Unix
-// and Windows alike (Git Bash finds projx-engine.exe on PATH). isProjxHookCmd detects it.
-const projxHookCommand = "${PROJX_ENGINE_BIN:-projx-engine} hook"
+// selfBinaryPath returns this running binary's absolute path with FORWARD SLASHES — the
+// one form that survives everywhere: bash (Git Bash) accepts `C:/Users/.../x.exe`, and
+// Windows/Node spawn accept it too, whereas a backslash path is mangled by bash. Falls
+// back to the bare name (PATH resolution) only if the executable path can't be resolved.
+func selfBinaryPath() string {
+	if self, err := os.Executable(); err == nil {
+		return filepath.ToSlash(self)
+	}
+	return "projx-engine"
+}
+
+// projxHookCommand is the command every ProjX lifecycle hook runs. Claude Code executes
+// hooks through a shell (bash, even on Windows via Git Bash), so the command must be
+// BASH-SAFE. A bare `projx-engine` needs the binary on PATH — which a Windows install to
+// %LOCALAPPDATA%\projx is NOT by default — so instead we bake this binary's absolute
+// forward-slash path as the default, quoted (spaces-safe), with a runtime PROJX_ENGINE_BIN
+// override. Result works with NO PATH configuration. isProjxHookCmd detects every variant.
+func projxHookCommand() string {
+	return `"${PROJX_ENGINE_BIN:-` + selfBinaryPath() + `}" hook`
+}
 
 // isProjxHookCmd reports whether a hook command string is a ProjX lifecycle hook. It
 // matches any command that runs projx-engine's `hook` subcommand — the current
 // PATH-resolved form, an explicit-path form, or a PROJX_ENGINE_BIN override — so
 // idempotency and uninstall detect every historical and current variant.
 func isProjxHookCmd(cmd string) bool {
-	return strings.Contains(cmd, "projx-engine") && strings.Contains(cmd, "hook")
+	if !strings.Contains(cmd, "hook") {
+		return false
+	}
+	// New form bakes an absolute path but always carries the PROJX_ENGINE_BIN override
+	// marker (stable even if the binary is renamed); old forms carry "projx-engine".
+	return strings.Contains(cmd, "PROJX_ENGINE_BIN") || strings.Contains(cmd, "projx-engine")
 }
 
 // globalFloorOrigin tags the global-scope floor records this command seeds, distinct
@@ -182,7 +199,7 @@ func mergeGlobalHook(settingsPath string) (added, skipped []string, err error) {
 		}
 		group := map[string]any{
 			"hooks": []any{
-				map[string]any{"type": "command", "command": projxHookCommand, "timeout": s.timeout},
+				map[string]any{"type": "command", "command": projxHookCommand(), "timeout": s.timeout},
 			},
 		}
 		if s.matcher != "" {
