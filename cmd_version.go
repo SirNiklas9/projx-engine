@@ -11,10 +11,25 @@ import (
 	"time"
 )
 
-// version is the human-set release version and the source of truth for
-// `projx-engine version`. Bump it in lockstep with the git tag (tag v0.4.0 ->
-// version = "0.4.0"). Overridable at build time: -ldflags "-X main.version=<v>".
-var version = "0.4.0"
+// version is NOT hardcoded to a release number — it is stamped at build time
+// from `git describe` via -ldflags "-X main.version=<v>" (see Makefile /
+// install.ps1). The "dev" default is only what an unstamped `go build` reports.
+var version = "dev"
+
+// resolveVersion returns the semver string ("0.4.0") for the running build, or
+// "" when the build carries no version (a plain `go build` with no ldflags).
+// Order: ldflag-stamped value -> module version (`go install pkg@vX`) -> unknown.
+func resolveVersion() string {
+	if version != "" && version != "dev" {
+		return strings.TrimPrefix(version, "v")
+	}
+	if info, ok := debug.ReadBuildInfo(); ok {
+		if v := info.Main.Version; v != "" && v != "(devel)" {
+			return strings.TrimPrefix(v, "v")
+		}
+	}
+	return ""
+}
 
 // releaseAPI is the GitHub latest-release endpoint for the public repo. Used by
 // `version --check` to report whether a newer release is available. The skill
@@ -33,7 +48,11 @@ func runVersionCmd(args []string) {
 		}
 	}
 
-	fmt.Printf("projx-engine v%s\n", strings.TrimPrefix(version, "v"))
+	if v := resolveVersion(); v != "" {
+		fmt.Printf("projx-engine v%s\n", v)
+	} else {
+		fmt.Println("projx-engine (dev build — no version stamped)")
+	}
 
 	rev, when, dirty := vcsInfo()
 	if rev != "" {
@@ -61,15 +80,20 @@ func runVersionCmd(args []string) {
 // build is behind it. Failures are non-fatal — a version check should never
 // break the command (offline, rate-limited, confined egress, etc.).
 func reportUpdate() {
+	cur := resolveVersion()
+	if cur == "" {
+		fmt.Println("  update:  dev build — build from a tagged release to compare")
+		return
+	}
 	latest, err := latestReleaseTag()
 	if err != nil {
 		fmt.Printf("  update:  check failed (%v)\n", err)
 		return
 	}
-	switch cmpVer(parseVer(version), parseVer(latest)) {
+	switch cmpVer(parseVer(cur), parseVer(latest)) {
 	case -1:
 		fmt.Printf("  update:  available v%s -> %s (run the projx skill to update)\n",
-			strings.TrimPrefix(version, "v"), latest)
+			cur, latest)
 	case 1:
 		fmt.Printf("  update:  up to date (ahead of latest release %s)\n", latest)
 	default:

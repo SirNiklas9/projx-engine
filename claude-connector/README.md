@@ -34,7 +34,7 @@ instructions (avoids the prompt-injection false-positive on hook context).
 
 ## Prerequisites
 
-1. **`projx-engine` on `PATH`.** Build it: `cd projx-engine && GOWORK=off go build -o ~/.local/bin/projx-engine .`
+1. **`projx-engine` on `PATH`.** Build it: `cd projx-engine && make install` (Windows: `.\install.ps1`) — both git-stamp the version.
    (`settings.json` invokes `projx-engine` by name; `init` warns if it isn't found.)
 2. That's it — no `bash`, no `jq`. The hook handler is pure Go and reads the hook
    JSON itself. `projx-engine init` seeds the store and indexes the code map for you.

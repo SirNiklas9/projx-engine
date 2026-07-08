@@ -9,8 +9,12 @@ New-Item -ItemType Directory -Force -Path $bin | Out-Null
 
 $env:GOWORK = 'off'
 $exe = Join-Path $bin 'projx-engine.exe'
-go build -o $exe .
-Write-Host "installed -> $exe"
+# Stamp the version from git so the binary reports the real release, never a
+# hardcoded number. Falls back to 'dev' outside a git checkout.
+$ver = git describe --tags --always --dirty
+if ([string]::IsNullOrWhiteSpace($ver)) { $ver = 'dev' }
+go build -ldflags "-X main.version=$ver" -o $exe .
+Write-Host "installed $ver -> $exe"
 
 $userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
 if ($userPath -notlike "*$bin*") {

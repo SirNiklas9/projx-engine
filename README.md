@@ -19,7 +19,8 @@ Almost. Two one-time steps, then one command per project.
 
 **Once (install the binary):**
 ```sh
-cd projx-engine && GOWORK=off go build -o ~/.local/bin/projx-engine .   # put it on PATH
+cd projx-engine && make install       # git-stamps the version, installs to ~/.local/bin
+# (Windows: .\install.ps1  —  raw builds work too but report version "dev")
 ```
 You also need the `claude` CLI (Claude Code) — you already have it.
 
