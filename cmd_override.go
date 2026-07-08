@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	store "github.com/SirNiklas9/projx-store"
 )
 
 // cmd_override.go — `projx-engine override <rule> --reason <why> [--ttl N]`.
@@ -37,15 +39,6 @@ type overrideGrant struct {
 // overrideGrants is the on-disk grant set, keyed by rule name.
 type overrideGrants struct {
 	Rules map[string]overrideGrant `json:"rules"`
-}
-
-// softRules are the overridable (deny-by-default-but-reasoned-override) rules. HARD
-// rules (secrets/off-limits gate patterns) are absent here on purpose — they cannot
-// be overridden. Advisory rules are context-only and never reach the gate.
-var softRules = map[string]bool{
-	"dispatcher-mode":     true,
-	"confirm-before-push": true,
-	"commit-style":        true,
 }
 
 func overridesPath(root string) string {
@@ -126,14 +119,20 @@ func runOverrideCmd(absRoot string, args []string) {
 		rule = fs.Arg(0)
 	}
 	rule = strings.TrimSpace(rule)
-	if rule == "" {
-		die("usage: override <rule> --reason <why> [--ttl N]\n  soft rules: %s", strings.Join(sortedSoftRules(), ", "))
-	}
 
-	if !softRules[rule] {
+	// The tier is DATA: resolve it from the store (explicit Record.Enforcement, else the
+	// built-in default) rather than a hardcoded list. Only soft rules are overridable.
+	st := openStore(absRoot)
+	defer st.Close()
+	soft := store.SoftRuleNames(st)
+
+	if rule == "" {
+		die("usage: override <rule> --reason <why> [--ttl N]\n  soft rules: %s", strings.Join(soft, ", "))
+	}
+	if !store.IsSoftRule(st, rule) {
 		die("rule %q is not a soft (overridable) rule. Overridable: %s\n"+
 			"(the secrets / off-limits floor is HARD and cannot be overridden.)",
-			rule, strings.Join(sortedSoftRules(), ", "))
+			rule, strings.Join(soft, ", "))
 	}
 	if strings.TrimSpace(*reason) == "" {
 		die("--reason is required: an override must be explicit and logged")
@@ -200,16 +199,3 @@ func recentOverrides(root string, n int) []string {
 	return out
 }
 
-func sortedSoftRules() []string {
-	out := make([]string, 0, len(softRules))
-	for r := range softRules {
-		out = append(out, r)
-	}
-	// small fixed set; simple insertion sort keeps output stable without importing sort here
-	for i := 1; i < len(out); i++ {
-		for j := i; j > 0 && out[j-1] > out[j]; j-- {
-			out[j-1], out[j] = out[j], out[j-1]
-		}
-	}
-	return out
-}

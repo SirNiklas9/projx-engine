@@ -81,6 +81,29 @@ func TestDispatcherModeSoftOverride(t *testing.T) {
 	}
 }
 
+// TestDispatcherModeHardForbidsOverride covers the data-driven retier: a project that
+// marks dispatcher-mode HARD (Record.Enforcement=hard) forbids the override entirely —
+// a grant is ignored and the edit stays blocked.
+func TestDispatcherModeHardForbidsOverride(t *testing.T) {
+	t.Setenv("PROJX_YOURS_DIR", t.TempDir())
+	root := t.TempDir()
+	st := openStore(root)
+	_ = st.Put(store.Record{ID: "gate-rule/setting/dispatcher-mode", Kind: store.KGateRule,
+		Scope: store.ScopeProject, Key: "setting/dispatcher-mode", Body: "on",
+		Enforcement: store.EnforcementHard})
+	st.Close()
+
+	// Grant an override — it must be ineffective against a HARD rule.
+	g := loadOverrideGrants(root)
+	g.Rules["dispatcher-mode"] = overrideGrant{Rule: "dispatcher-mode", Reason: "x", Uses: 5}
+	_ = saveOverrideGrants(root, g)
+
+	edit := []byte(`{"hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"main.go"}}`)
+	if _, _, code := handleHook(root, edit); code != 2 {
+		t.Fatalf("hard dispatcher-mode with a grant: got %d, want 2 (still blocked)", code)
+	}
+}
+
 // TestConsumeOverride unit-tests the grant lifecycle directly.
 func TestConsumeOverride(t *testing.T) {
 	root := t.TempDir()

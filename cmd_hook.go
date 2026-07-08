@@ -153,11 +153,21 @@ func handleHook(absRoot string, input []byte) (stdout, stderr string, code int) 
 
 		if store.IsMutatingTool(ev.ToolName) && os.Getenv("PROJX_ROLE") != "worker" {
 			if store.DispatcherModeOn(st) {
-				// SOFT rule: deny by default, but honor a reasoned override grant (B).
-				if reason, ok := consumeOverride(storeRoot, "dispatcher-mode"); ok {
-					_ = reason // grant consumed; allow this one action to proceed
-				} else {
-					return "", "ProjX dispatcher-mode (soft): the trunk dispatches, it does not edit. Route this to a tier-agent — `projx-engine dispatch --run \"<task>\"` — or override once with a reason: `projx-engine override dispatcher-mode --reason \"<why>\"`.", 2
+				// Tier is DATA: soft = overridable with a logged reason (B); a project may
+				// retier dispatcher-mode to hard (store record Enforcement=hard) to forbid
+				// the override entirely. On a consumed grant we fall through to the hard
+				// floor below (an override past dispatcher-mode never bypasses the gate).
+				soft := store.IsSoftRule(st, "dispatcher-mode")
+				allowed := false
+				if soft {
+					_, allowed = consumeOverride(storeRoot, "dispatcher-mode")
+				}
+				if !allowed {
+					hint := "override once with a reason: `projx-engine override dispatcher-mode --reason \"<why>\"`."
+					if !soft {
+						hint = "this rule is HARD here — it cannot be overridden."
+					}
+					return "", "ProjX dispatcher-mode: the trunk dispatches, it does not edit. Route this to a tier-agent — `projx-engine dispatch --run \"<task>\"` — or " + hint, 2
 				}
 			}
 		}
