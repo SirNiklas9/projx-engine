@@ -58,6 +58,13 @@ func runVerifyCmd(absRoot string, args []string) {
 		}
 	}
 
+	// ── 1b. Drift (declared facts vs actual filesystem reality) ───────────────
+	if !behaviorOnly {
+		if checkDrift(absRoot, st) {
+			failed = true
+		}
+	}
+
 	// ── 2. Behavior (build + test) ────────────────────────────────────────────
 	if !noBuild {
 		cmd := verifyCommand(absRoot, st)
