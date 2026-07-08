@@ -50,15 +50,11 @@ func runDispatchCmd(absRoot string, args []string) {
 	}
 	message := strings.Join(rest, " ")
 
-	// 1. DECOMPOSE — deterministic split, escalating to the cheap model only when the
-	//    connectors find a single task but the message looks multi-verb and a splitter
-	//    endpoint is available (cheapest-first, same philosophy as the triage decider).
+	// 1. DECOMPOSE — split ONLY on explicit task delimiters (bullets / numbers / TASK: /
+	//    ---). A single-intent spec with no delimiters stays ONE task. The old cheap-model
+	//    splitter is intentionally NOT used here: it shredded a cohesive single-file spec
+	//    into mis-routed fragments. To fan out, author explicit delimiters.
 	tasks := store.Decompose(message)
-	if len(tasks) < 2 {
-		if split := modelDecompose(absRoot, message); len(split) > len(tasks) {
-			tasks = split
-		}
-	}
 
 	// 2. ROUTE each task through the same decider run uses — the rules pick the tier.
 	cfg := routing.LoadConfig(absRoot)
