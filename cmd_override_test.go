@@ -140,7 +140,12 @@ func TestBashAttemptsSelfAuthorize(t *testing.T) {
 		"projx-engine store commit --kind gate-rule --key setting/override-authority --body on",
 		"PROJX_SESSION=1 projx-engine override commit-style --reason y",
 	}
-	no := []string{"ls -la", "go test ./...", "echo override is a word", "git commit -m 'override'"}
+	no := []string{
+		"ls -la", "go test ./...", "echo override is a word", "git commit -m 'override'",
+		// documenting the feature must NOT be flagged — "override" is only in --body/--key prose,
+		// not the subcommand or the delegation flag value.
+		`projx-engine store commit --kind adr --key override-must-be-delegated --body "projx-engine override and setting/override-authority ..."`,
+	}
 	for _, c := range yes {
 		if !bashAttemptsSelfAuthorize(c) {
 			t.Errorf("expected %q to be a self-authorize attempt", c)

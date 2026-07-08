@@ -14,23 +14,76 @@ func gateDeniedPath(s store.Store, path string) (pattern string, denied bool) {
 }
 
 // bashAttemptsSelfAuthorize reports whether a Bash command tries to self-authorize an
-// override — either by running `projx-engine override …` or by flipping the delegation
-// flag `setting/override-authority`. The hook denies these when the human hasn't
-// delegated, so the AI cannot grant its own bypass. Coarse substring match on purpose
-// (over-matching only forces the human to run it — the safe direction).
+// override — either by running the `override` subcommand or by flipping the delegation
+// flag via `--key setting/override-authority`. Detection is POSITIONAL (the subcommand
+// after the binary; the value of a --key flag), not a substring scan, so a command that
+// merely mentions "override" in a --body/message (e.g. documenting the feature) is not
+// caught — only actual self-authorization attempts are.
 func bashAttemptsSelfAuthorize(cmd string) bool {
-	c := strings.ToLower(cmd)
-	if c == "" {
-		return false
-	}
-	if strings.Contains(c, "override-authority") {
-		return true // changing the delegation flag itself
-	}
-	if strings.Contains(c, "override") &&
-		(strings.Contains(c, "projx-engine") || strings.Contains(c, "projx_engine")) {
-		return true // running the override subcommand
+	toks := shellFields(cmd)
+	for i, t := range toks {
+		lt := strings.ToLower(t)
+
+		// `projx-engine [--root X] override …` — override as the subcommand.
+		if strings.HasSuffix(strings.TrimSuffix(lt, ".exe"), "projx-engine") {
+			j := i + 1
+			for j+1 < len(toks) && toks[j] == "--root" {
+				j += 2 // skip `--root <dir>`
+			}
+			if j < len(toks) && strings.ToLower(toks[j]) == "override" {
+				return true
+			}
+		}
+
+		// Flipping the delegation flag: `--key setting/override-authority` / `--key=…`.
+		if lt == "--key" && i+1 < len(toks) && strings.Contains(strings.ToLower(toks[i+1]), "override-authority") {
+			return true
+		}
+		if strings.HasPrefix(lt, "--key=") && strings.Contains(lt, "override-authority") {
+			return true
+		}
 	}
 	return false
+}
+
+// shellFields splits a command line into words, keeping single- and double-quoted spans
+// as ONE token (quotes stripped). So `--body "projx-engine override x"` is [`--body`,
+// `projx-engine override x`] — the quoted prose stays one token and can't masquerade as a
+// real `projx-engine override` invocation. Coarse (no escapes / no $-expansion), which is
+// all the positional guard in bashAttemptsSelfAuthorize needs.
+func shellFields(s string) []string {
+	var out []string
+	var cur strings.Builder
+	var quote rune
+	started := false
+	flush := func() {
+		if started {
+			out = append(out, cur.String())
+			cur.Reset()
+			started = false
+		}
+	}
+	for _, r := range s {
+		switch {
+		case quote != 0:
+			if r == quote {
+				quote = 0
+			} else {
+				cur.WriteRune(r)
+			}
+			started = true
+		case r == '\'' || r == '"':
+			quote = r
+			started = true
+		case r == ' ' || r == '\t' || r == '\n' || r == '\r':
+			flush()
+		default:
+			cur.WriteRune(r)
+			started = true
+		}
+	}
+	flush()
+	return out
 }
 
 // bashShellSeps splits a shell command into candidate tokens: whitespace plus the
