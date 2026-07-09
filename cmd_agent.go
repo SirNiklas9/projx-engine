@@ -106,10 +106,19 @@ func runAgentCmd(absRoot string, args []string) {
 	// not the agent — supplies these defaults.
 	allowHosts, allowBins = mergeAllowlists(loadCageConfig(absRoot), allowHosts, allowBins)
 
-	// Basic worker permissions: the sandbox exec allow-list includes the curated
-	// safe-list (git/toolchains/projx-engine/read utils) so a confined worker can
-	// actually build and test — not just git. Explicit --allow flags still extend it.
-	effectiveAllowBins := dedupStrings(append(append([]string{"git", "projx-engine"}, workerSafeTools...), allowBins...))
+	// Worker permissions are DATA, read from the store — nothing hardcoded. The
+	// safe-list (setting/worker-allow) is the "basic permissions" floor; the
+	// full-autonomy override (setting/worker-autonomy) lets the human verbally grant a
+	// worker all permissions.
+	permSt := openStore(absRoot)
+	workerBins := store.WorkerAllowBins(permSt)
+	workerFullAuto := store.WorkerFullAutonomy(permSt)
+	permSt.Close()
+
+	// The sandbox exec allow-list includes the declared safe-list (toolchains/read
+	// utils) so a confined worker can actually build and test — not just git. Explicit
+	// --allow flags still extend it.
+	effectiveAllowBins := dedupStrings(append(append([]string{"git", "projx-engine"}, workerBins...), allowBins...))
 
 	// ── Step 2: resolve the agent command (BEFORE any jail/PATH change) ───────
 	// Capture the real PATH now, before we modify anything.
@@ -154,11 +163,17 @@ func runAgentCmd(absRoot string, args []string) {
 		agentAbsPath = abs
 	}
 
-	// Basic worker permissions (Claude launcher): auto-approve the curated safe-list so
-	// the worker runs unattended for normal coding; anything outside it still prompts —
-	// the "reach and ask for more" escalation. Other providers keep their own config.
+	// Worker permissions (Claude launcher): full autonomy when the human has granted it
+	// (setting/worker-autonomy), else auto-approve the declared safe-list so the worker
+	// runs unattended for normal coding while anything outside it still prompts — the
+	// "reach and ask for more" escalation. Other providers keep their own config. The
+	// ProjX gate still blocks secrets/off-limits in either mode.
 	if isClaudeAgent(agentAbsPath) {
-		agentLeadingArgs = append(agentLeadingArgs, claudeAllowedToolsArgs(workerSafeTools)...)
+		if workerFullAuto {
+			agentLeadingArgs = append(agentLeadingArgs, "--dangerously-skip-permissions")
+		} else {
+			agentLeadingArgs = append(agentLeadingArgs, claudeAllowedToolsArgs(workerBins)...)
+		}
 	}
 
 	// ── Step 3: open the store, compile and write the ambient context ─────────

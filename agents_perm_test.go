@@ -1,6 +1,7 @@
 package main
 
 import (
+	store "github.com/SirNiklas9/projx-store"
 	"strings"
 	"testing"
 )
@@ -24,15 +25,16 @@ func TestClaudeAllowedToolsArgs(t *testing.T) {
 	}
 }
 
-func TestWorkerSafeToolsIncludesBuildTools(t *testing.T) {
-	// A worker must be able to build/test/commit unattended → git + a toolchain present.
+func TestWorkerAllowFloorFromStore(t *testing.T) {
+	// The safe-list is DATA: with a nil store the reader falls back to the seeded
+	// default, which must still let a worker build/test/commit unattended.
 	set := map[string]bool{}
-	for _, b := range workerSafeTools {
+	for _, b := range store.WorkerAllowBins(nil) {
 		set[b] = true
 	}
 	for _, must := range []string{"git", "go", "projx-engine"} {
 		if !set[must] {
-			t.Errorf("workerSafeTools missing required %q", must)
+			t.Errorf("default worker allow-list missing required %q", must)
 		}
 	}
 }

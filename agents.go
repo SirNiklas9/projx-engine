@@ -155,18 +155,9 @@ func agentLaunch(absRoot, task string) (name string, argv []string, env map[stri
 	return name, argv, env
 }
 
-// workerSafeTools is the curated floor of shell commands a dispatched worker may run
-// WITHOUT prompting — the "basic permissions" a worker needs to actually build: VCS,
-// the common toolchains, its own engine (read ops), and read-only shell utilities.
-// Anything NOT on this list still prompts, which is the "reach and ask for more"
-// escalation (the human grants the rest). Named here so a project can widen it later
-// from data; the ProjX gate independently blocks secrets/off-limits regardless.
-var workerSafeTools = []string{
-	"git", "go", "gofmt", "goimports", "make",
-	"npm", "npx", "pnpm", "yarn", "node",
-	"projx-engine",
-	"cat", "ls", "grep", "rg", "find", "sed", "awk", "head", "tail", "wc",
-}
+// The worker permission floor is NOT defined here — it lives in the store as editable
+// data (store.SettingWorkerAllow / store.WorkerAllowBins), so any rule can change
+// without a recompile. The engine only RENDERS whatever the store declares (below).
 
 // claudeAllowedToolsArgs renders a safe-list into the agent CLI's --allowedTools flag:
 // each shell command as Bash(<cmd>:*), plus the always-safe read-only tools. Pure, so
