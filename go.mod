@@ -18,7 +18,7 @@ require (
 
 require (
 	github.com/BananaLabs-OSS/Pulp-ext-hook v0.0.0 // indirect
-	github.com/SirNiklas9/sow v0.0.0 // indirect
+	github.com/SirNiklas9/sow v0.1.0 // indirect
 	github.com/bmatcuk/doublestar/v4 v4.10.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/btree v1.1.3 // indirect

@@ -92,6 +92,8 @@ func main() {
 		runVersionCmd(rest)
 	case "status":
 		runStatusCmd(absRoot, rest)
+	case "statusline":
+		runStatuslineCmd(absRoot, rest)
 	case "store":
 		runStoreCmd(absRoot, rest)
 	case "gate":

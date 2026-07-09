@@ -54,7 +54,39 @@ func runHookCmd(absRoot string, _ []string) {
 	if cellURL := strings.TrimSpace(os.Getenv("PROJX_CELL_URL")); cellURL != "" {
 		stdout, stderr, code = handleHookViaCell(cellURL, data)
 	} else {
-		stdout, stderr, code = handleHook(hookRoot(absRoot, data), data)
+		root := hookRoot(absRoot, data)
+		stdout, stderr, code = handleHook(root, data)
+		// Status-line breadcrumb (best-effort, never affects the result). Records two
+		// facts for `projx-engine statusline`: the last visible ProjX ACTION (ctx/gate)
+		// and the actively-touched PROJECT (floating scope — the badge follows what any
+		// agent edits/reads, not the static cwd). The crumb lives in the session cwd's
+		// project so the statusline command, deriving the same home, finds it.
+		home := targetStoreRoot(root, filepath.Join(root, "_"))
+		var meta struct {
+			SessionID string `json:"session_id"`
+			Event     string `json:"hook_event_name"`
+			ToolInput struct {
+				FilePath string `json:"file_path"`
+			} `json:"tool_input"`
+		}
+		if json.Unmarshal(data, &meta) == nil && meta.SessionID != "" {
+			switch {
+			case meta.Event == "PreToolUse" && code == 2:
+				updateCrumb(home, meta.SessionID, func(c *statusCrumb) { c.A = "gate" })
+			case meta.Event == "PreToolUse" && meta.ToolInput.FilePath != "":
+				// A file was touched (allowed) → float the scope to its owning project.
+				if tr := targetStoreRoot(root, meta.ToolInput.FilePath); isProjxDir(tr) {
+					updateCrumb(home, meta.SessionID, func(c *statusCrumb) { c.R = tr })
+				}
+			case meta.Event == "SessionStart":
+				// Fresh session: reset the floated scope, note the injected floor.
+				n := len(stdout)
+				updateCrumb(home, meta.SessionID, func(c *statusCrumb) { c.A = "ctx"; c.N = n; c.R = "" })
+			case meta.Event == "UserPromptSubmit" && stdout != "":
+				n := len(stdout)
+				updateCrumb(home, meta.SessionID, func(c *statusCrumb) { c.A = "ctx"; c.N = n })
+			}
+		}
 	}
 	if stdout != "" {
 		fmt.Print(stdout)
