@@ -155,6 +155,44 @@ func agentLaunch(absRoot, task string) (name string, argv []string, env map[stri
 	return name, argv, env
 }
 
+// workerSafeTools is the curated floor of shell commands a dispatched worker may run
+// WITHOUT prompting — the "basic permissions" a worker needs to actually build: VCS,
+// the common toolchains, its own engine (read ops), and read-only shell utilities.
+// Anything NOT on this list still prompts, which is the "reach and ask for more"
+// escalation (the human grants the rest). Named here so a project can widen it later
+// from data; the ProjX gate independently blocks secrets/off-limits regardless.
+var workerSafeTools = []string{
+	"git", "go", "gofmt", "goimports", "make",
+	"npm", "npx", "pnpm", "yarn", "node",
+	"projx-engine",
+	"cat", "ls", "grep", "rg", "find", "sed", "awk", "head", "tail", "wc",
+}
+
+// claudeAllowedToolsArgs renders a safe-list into the agent CLI's --allowedTools flag:
+// each shell command as Bash(<cmd>:*), plus the always-safe read-only tools. Pure, so
+// it is unit-tested directly. Returns nil for an empty list (no flag → everything
+// prompts, i.e. the old behavior).
+func claudeAllowedToolsArgs(bins []string) []string {
+	if len(bins) == 0 {
+		return nil
+	}
+	args := []string{"--allowedTools"}
+	for _, b := range bins {
+		args = append(args, "Bash("+b+":*)")
+	}
+	args = append(args, "Read", "Grep", "Glob") // read-only tools are always safe
+	return args
+}
+
+// isClaudeAgent reports whether the resolved agent binary is a Claude Code CLI — the
+// launcher whose allow-list flag (--allowedTools) we know how to render. Other
+// providers keep their own permission config; the flag is not injected for them, so
+// the safe-list stays agnostic (Claude gets it as data; a future provider supplies its
+// own renderer via the integration seam).
+func isClaudeAgent(agentPath string) bool {
+	return strings.Contains(strings.ToLower(filepath.Base(agentPath)), "claude")
+}
+
 // kvSlice turns an env map into "k=v" entries for exec.Cmd.Env.
 func kvSlice(m map[string]string) []string {
 	out := make([]string, 0, len(m))
