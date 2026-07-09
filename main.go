@@ -130,6 +130,10 @@ func main() {
 		runRunCmd(absRoot, rest)
 	case "dispatch":
 		runDispatchCmd(absRoot, rest)
+	case "__dispatch-run":
+		// Hidden: the detached background supervisor for `dispatch --run`. Runs the
+		// routed steps + verify off the trunk, updating the run manifest as it goes.
+		runDispatchSupervise(absRoot, rest)
 	case "mcp":
 		runMCPCmd(absRoot, rest)
 	case "impact":

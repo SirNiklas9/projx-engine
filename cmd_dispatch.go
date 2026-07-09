@@ -33,6 +33,12 @@ type dispatchStep struct {
 }
 
 func runDispatchCmd(absRoot string, args []string) {
+	// `dispatch status [id]` — read background run manifests (never pins the trunk).
+	if len(args) > 0 && args[0] == "status" {
+		runDispatchStatus(absRoot, args[1:])
+		return
+	}
+
 	run := false
 	rest := args[:0]
 	for _, a := range args {
@@ -75,52 +81,13 @@ func runDispatchCmd(absRoot string, args []string) {
 		return
 	}
 
-	// FAN OUT — one agent per task, at its own tier, in order.
-	agentWork := false
-	for i, s := range steps {
-		fmt.Fprintf(os.Stderr, "\n── dispatch %d/%d [%s] %s\n", i+1, len(steps), stepTier(s.Decision), s.Task)
-		if s.Decision.Kind == "agent" {
-			agentWork = true
-		}
-		runOneDispatchStep(absRoot, s)
-	}
-
-	// AUTO-GATE — after agent work, run the verify gate (boundaries + drift + build/test)
-	// on the RESULT and gate on it. Reject-and-report to the human on failure: the change
-	// landed in the working tree but is flagged NOT verified, so it isn't silently trusted.
-	if agentWork {
-		fmt.Fprintln(os.Stderr, "\n── dispatch: verifying the result ──")
-		if verifyAll(absRoot, false, false) {
-			fmt.Fprintln(os.Stderr, "\ndispatch: ⚠ VERIFY FAILED — the dispatched change is NOT verified. Review and fix before relying on it.")
-			os.Exit(1)
-		}
-		fmt.Fprintln(os.Stderr, "dispatch: ✓ result verified (boundaries + drift + build/test).")
-	}
-}
-
-// runOneDispatchStep executes a single routed task, mirroring cmd_run's execution: a
-// deterministic op runs locally (no token), an agent task launches at its resolved tier.
-func runOneDispatchStep(absRoot string, s dispatchStep) {
-	d := s.Decision
-	if d.Kind == "deterministic" {
-		switch d.Op {
-		case "verify":
-			runVerifyCmd(absRoot, nil)
-		case "store log":
-			runStoreCmd(absRoot, []string{"log"})
-		case "store list":
-			runStoreCmd(absRoot, []string{"list"})
-		default:
-			fmt.Fprintf(os.Stderr, "dispatch: skip unknown deterministic op %q\n", d.Op)
-		}
-		return
-	}
-	if d.ProviderCmd != "" {
-		if err := os.Setenv("PROJX_AGENT_CMD", d.ProviderCmd); err != nil {
-			fmt.Fprintf(os.Stderr, "dispatch: warning: PROJX_AGENT_CMD: %v\n", err)
-		}
-	}
-	runAgentCmd(absRoot, []string{"--task", s.Task, "--", s.Task})
+	// FAN OUT — DETACHED. The old path ran the steps + verify inline, pinning the
+	// trunk (whoever called `dispatch --run`) for the whole run so no new instruction
+	// could queue. Now the fan-out runs in a background supervisor: this call writes
+	// the run manifest, launches the supervisor, and RETURNS immediately with a
+	// dispatch id. Step-by-step progress, the verify gate, and the final outcome are
+	// recorded to the manifest (see `dispatch status`) — off the trunk entirely.
+	startDetachedDispatch(absRoot, steps, message)
 }
 
 // printDispatchPlan shows the decomposition + the per-task tier the rules chose.
