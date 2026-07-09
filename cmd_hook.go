@@ -72,7 +72,13 @@ func runHookCmd(absRoot string, _ []string) {
 		if json.Unmarshal(data, &meta) == nil && meta.SessionID != "" {
 			switch {
 			case meta.Event == "PreToolUse" && code == 2:
-				updateCrumb(home, meta.SessionID, func(c *statusCrumb) { c.A = "gate" })
+				// A block — float the badge to the blocked area (if it's a project) so the
+				// human sees WHERE the wall is, at a glance, alongside the red marker.
+				if tr := targetStoreRoot(root, meta.ToolInput.FilePath); meta.ToolInput.FilePath != "" && isProjxDir(tr) {
+					updateCrumb(home, meta.SessionID, func(c *statusCrumb) { c.A = "gate"; c.R = tr })
+				} else {
+					updateCrumb(home, meta.SessionID, func(c *statusCrumb) { c.A = "gate" })
+				}
 			case meta.Event == "PreToolUse" && meta.ToolInput.FilePath != "":
 				// A file was touched (allowed) → float the scope to its owning project.
 				if tr := targetStoreRoot(root, meta.ToolInput.FilePath); isProjxDir(tr) {
@@ -153,8 +159,14 @@ func handleHook(absRoot string, input []byte) (stdout, stderr string, code int) 
 		return "", "", 0
 
 	case "UserPromptSubmit":
-		if ctx := buildSessionContext(absRoot, sid, ev.Prompt, false); ctx != "" {
-			return wrapProjectContext(frame(withOverrideNotice(absRoot, ctx))), "", 0
+		// FLOATING context: inject the ACTIVE project's knowledge, not just the cwd's.
+		// The active project is resolved from the prompt (an explicit path) or from what
+		// any agent has been touching this session — so working on Sessions pulls the
+		// Sessions store, working on Evolution pulls Evolution. openStore composes the
+		// global floor over whichever project, so law is injected either way.
+		root := activeContextRoot(absRoot, sid, ev.Prompt)
+		if ctx := buildSessionContext(root, sid, ev.Prompt, false); ctx != "" {
+			return wrapProjectContext(frame(withOverrideNotice(root, ctx))), "", 0
 		}
 		return "", "", 0
 

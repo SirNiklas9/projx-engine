@@ -23,10 +23,54 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	store "github.com/SirNiklas9/projx-store"
 )
+
+// absPathRe matches a Windows absolute path inside free text (e.g. a path named in a
+// prompt: "fix C:\Users\...\Sessions\src\x.astro"). Used to probe which project a
+// prompt is about BEFORE any file is touched. Windows-only on purpose: a bare POSIX
+// "/foo/bar" pattern in prose produces too many false positives ("and/or", URLs).
+var absPathRe = regexp.MustCompile(`[A-Za-z]:[\\/][^\s"'` + "`" + `]+`)
+
+// activeContextRoot resolves WHICH project's context should be injected for a turn —
+// ProjX's floating scope applied to context, not just the badge. Priority:
+//  1. a project named by an explicit path in the prompt (probe-from-prompt: the human
+//     told us where the work is before we touch anything);
+//  2. the project of the last file any agent touched this session (floated scope);
+//  3. the session's own cwd project (the default).
+// Always returns a directory; callers open the store there (openStore composes the
+// global floor over it, so law travels regardless of which project is active).
+func activeContextRoot(absRoot, sid, prompt string) string {
+	if p := firstProjectInPrompt(absRoot, prompt); p != "" {
+		return p
+	}
+	home := targetStoreRoot(absRoot, filepath.Join(absRoot, "_"))
+	if sid != "" && isProjxDir(home) {
+		if c, ok := readStatusCrumb(home, sid); ok && c.R != "" && isProjxDir(c.R) {
+			return c.R
+		}
+	}
+	return absRoot
+}
+
+// firstProjectInPrompt returns the ProjX project owning the first absolute path named
+// in the prompt, or "" if none resolves to a project.
+func firstProjectInPrompt(absRoot, prompt string) string {
+	if prompt == "" {
+		return ""
+	}
+	m := strings.TrimSpace(absPathRe.FindString(prompt))
+	if m == "" {
+		return ""
+	}
+	if tr := targetStoreRoot(absRoot, m); isProjxDir(tr) {
+		return tr
+	}
+	return ""
+}
 
 // ANSI helpers. Claude Code renders ANSI SGR in the status line. Kept as 256-color
 // codes so the palette is stable across terminals (indigo accent, semantic hues).
