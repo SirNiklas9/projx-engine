@@ -171,7 +171,9 @@ func claudeAllowedToolsArgs(bins []string) []string {
 	for _, b := range bins {
 		args = append(args, "Bash("+b+":*)")
 	}
-	args = append(args, "Read", "Grep", "Glob") // read-only tools are always safe
+	// A worker's core job is editing files, so the file tools are basic permissions too;
+	// the ProjX gate still blocks off-limits paths on every Read/Edit/Write regardless.
+	args = append(args, "Read", "Write", "Edit", "MultiEdit", "Grep", "Glob")
 	return args
 }
 

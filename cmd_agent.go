@@ -170,9 +170,13 @@ func runAgentCmd(absRoot string, args []string) {
 	// ProjX gate still blocks secrets/off-limits in either mode.
 	if isClaudeAgent(agentAbsPath) {
 		if workerFullAuto {
-			agentLeadingArgs = append(agentLeadingArgs, "--dangerously-skip-permissions")
-		} else {
-			agentLeadingArgs = append(agentLeadingArgs, claudeAllowedToolsArgs(workerBins)...)
+			agentLeadingArgs = append([]string{"--dangerously-skip-permissions"}, agentLeadingArgs...)
+		} else if len(agentLeadingArgs) > 0 {
+			// PREPEND the allow-list: --allowedTools is variadic (<tools...>) and would
+			// otherwise swallow the trailing task prompt. Placing it first means the next
+			// route flag (--permission-mode / --model) terminates the variadic, leaving the
+			// prompt intact as a positional arg. Guarded on there being a following flag.
+			agentLeadingArgs = append(claudeAllowedToolsArgs(workerBins), agentLeadingArgs...)
 		}
 	}
 
