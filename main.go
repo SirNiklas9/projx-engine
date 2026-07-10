@@ -130,6 +130,8 @@ func main() {
 		runRunCmd(absRoot, rest)
 	case "dispatch":
 		runDispatchCmd(absRoot, rest)
+	case "workflow":
+		runWorkflowCmd(absRoot, rest)
 	case "__dispatch-run":
 		// Hidden: the detached background supervisor for `dispatch --run`. Runs the
 		// routed steps + verify off the trunk, updating the run manifest as it goes.
@@ -266,6 +268,10 @@ Real commands:
   dispatch [--run] <message>              decompose a multi-task message; route each task
                                             to its own tier (plan-only; --run fans out)
                                             policy: .projx/routing.json (optional)
+  workflow run [--dry-run] <manifest>     SEQUENCE a declared, ordered set of steps over
+                                            dispatch + verify: each step has a task, optional
+                                            tier/role + deps, and an optional per-step verify
+                                            gate that STOPS the run on failure (--dry-run: plan)
   secret set <CODENAME>                   seal a secret (reads value from stdin)
   secret ls                               list sealed secret codenames (no values)
   secret rm <CODENAME>                    delete a sealed secret
