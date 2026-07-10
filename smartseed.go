@@ -10,6 +10,8 @@ package main
 //     package.json scripts, and the Go toolchain (go build/test);
 //   - gate rules — the off-limits floor (.env*, keys, secrets, ssh) if a store predates
 //     the floor gates and is missing them;
+//   - conventions — obvious "how this repo is worked" rules read off config files
+//     (package manager, CI system, containerization, formatter/linter/typecheck);
 //   - architecture — a high-level overview doc + one declared-structure record per
 //     top-level source module + a doc of key entrypoints (main/init), BEYOND the raw
 //     per-symbol map that `map sync` already produces.
@@ -106,7 +108,21 @@ func smartSeed(st store.Store, absRoot string) (int, []string) {
 		notes = append(notes, fmt.Sprintf("%d off-limits gate(s)", added))
 	}
 
-	// 3. Architecture — overview doc + per-module declared-structure + entrypoints doc.
+	// 3. Conventions — obvious, high-signal project conventions read off config files
+	// (package manager, CI, containerization, formatter/linter, typecheck). These are
+	// the "how this repo is worked" rules an agent should follow, committed as real
+	// KConvention records (idempotent via put's ID guard) — beyond the per-stack floor.
+	added = 0
+	for _, c := range detectConventions(absRoot) {
+		if put(store.KConvention, c.Key, c.Body) {
+			added++
+		}
+	}
+	if added > 0 {
+		notes = append(notes, fmt.Sprintf("%d convention(s)", added))
+	}
+
+	// 4. Architecture — overview doc + per-module declared-structure + entrypoints doc.
 	arch := 0
 	overview, modules, entrypoints := scanArchitecture(absRoot)
 	if overview != "" && put(store.KDoc, "architecture/overview", overview) {
@@ -175,6 +191,116 @@ func detectRecipes(absRoot string) []profileRec {
 	}
 
 	return out
+}
+
+// detectConventions reads OBVIOUS, unambiguous conventions off the repo's config
+// files — the package manager in force, the CI system, containerization, and the
+// formatter/linter/typecheck toolchain — so a freshly-init'd store already declares
+// "how this repo is worked" instead of a bare floor. Deterministic and shallow (only
+// stats/reads marker files at the root); returns KConvention profileRecs, de-duped by
+// key. Idempotency is handled by smartSeed's put (an existing ID is skipped).
+func detectConventions(absRoot string) []profileRec {
+	var out []profileRec
+	seenKey := map[string]bool{}
+	add := func(key, body string) {
+		if key == "" || body == "" || seenKey[key] {
+			return
+		}
+		seenKey[key] = true
+		out = append(out, profileRec{Key: key, Body: body})
+	}
+	has := func(rel string) bool { return fileExists(filepath.Join(absRoot, rel)) }
+
+	// Package manager (Node): the lockfile that is present is the one to use.
+	if has("package.json") {
+		switch {
+		case has("pnpm-lock.yaml"):
+			add("package manager", "Node: use pnpm (pnpm-lock.yaml is present) — not npm or yarn.")
+		case has("yarn.lock"):
+			add("package manager", "Node: use yarn (yarn.lock is present).")
+		case has("bun.lockb"):
+			add("package manager", "Node: use bun (bun.lockb is present).")
+		case has("package-lock.json"):
+			add("package manager", "Node: use npm (package-lock.json is present).")
+		}
+	}
+
+	// CI system — keep the pipeline green.
+	switch {
+	case dirHasFiles(filepath.Join(absRoot, ".github", "workflows")):
+		add("ci pipeline", "CI runs on GitHub Actions (.github/workflows). A change that breaks CI is not done — keep the pipeline green.")
+	case has(".gitlab-ci.yml"):
+		add("ci pipeline", "CI runs on GitLab CI (.gitlab-ci.yml). Keep the pipeline green before merging.")
+	case has(".circleci/config.yml"):
+		add("ci pipeline", "CI runs on CircleCI (.circleci/config.yml). Keep the pipeline green before merging.")
+	}
+
+	// Containerization.
+	if has("Dockerfile") || has("docker-compose.yml") || has("docker-compose.yaml") || has("compose.yaml") {
+		add("containerized build", "Containerized: this project builds/runs via Docker (Dockerfile/compose present).")
+	}
+
+	// Editor / formatting config.
+	if has(".editorconfig") {
+		add("editor formatting", "Formatting is governed by .editorconfig — respect its indentation and end-of-line rules.")
+	}
+
+	// JS/TS formatter + linter + typecheck.
+	if has(".prettierrc") || has(".prettierrc.json") || has(".prettierrc.js") || has(".prettierrc.yaml") || has(".prettierrc.yml") || has("prettier.config.js") {
+		add("js formatting", "JS/TS formatting via Prettier — run it before committing.")
+	}
+	if has(".eslintrc") || has(".eslintrc.json") || has(".eslintrc.js") || has(".eslintrc.cjs") || has(".eslintrc.yaml") || has("eslint.config.js") || has("eslint.config.mjs") {
+		add("js linting", "Linting via ESLint — keep lint clean before declaring done.")
+	}
+	if has("tsconfig.json") {
+		add("typescript typecheck", "TypeScript project (tsconfig.json) — typecheck (`tsc --noEmit` or the build) before declaring done.")
+	}
+
+	// Python lint/format.
+	if has("ruff.toml") || has(".ruff.toml") || pyprojectHasTool(absRoot, "ruff") {
+		add("python lint", "Python linting/formatting via Ruff — run `ruff check` (and `ruff format`) before declaring done.")
+	}
+	if has(".flake8") {
+		add("python lint", "Python linting via flake8 (.flake8) — keep it clean before declaring done.")
+	}
+	if pyprojectHasTool(absRoot, "black") {
+		add("python formatting", "Python formatting via Black — run it before committing.")
+	}
+
+	// Rust format/lint.
+	if has("rustfmt.toml") || has(".rustfmt.toml") {
+		add("rust formatting", "Rust formatting via rustfmt (rustfmt.toml) — run `cargo fmt` before declaring done.")
+	}
+	if has("clippy.toml") || has(".clippy.toml") {
+		add("rust lint", "Rust linting via Clippy — run `cargo clippy` and keep it warning-free.")
+	}
+
+	return out
+}
+
+// dirHasFiles reports whether dir exists and contains at least one regular file
+// (used to detect a populated CI directory like .github/workflows).
+func dirHasFiles(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			return true
+		}
+	}
+	return false
+}
+
+// pyprojectHasTool reports whether pyproject.toml declares a [tool.<name>] section —
+// a cheap, dependency-free way to detect a configured Python tool (ruff/black/…).
+func pyprojectHasTool(absRoot, name string) bool {
+	data, err := os.ReadFile(filepath.Join(absRoot, "pyproject.toml"))
+	if err != nil {
+		return false
+	}
+	return strings.Contains(string(data), "[tool."+name)
 }
 
 // makeTargets extracts real, invocable rule names from a Makefile: skips comments,

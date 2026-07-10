@@ -81,6 +81,14 @@ var stacks = map[string]Profile{
 		NetAllow: []string{"pypi.org", "files.pythonhosted.org"},
 		Tools:    []string{"python", "python3", "uv", "pip", "git"},
 	},
+	"rust": {
+		Name: "rust", Desc: "Rust projects",
+		Conventions: []profileRec{
+			{"rust toolchain", "Rust: build with cargo. Run `cargo test` and `cargo fmt` (and `cargo clippy` if configured) before declaring done."},
+		},
+		NetAllow: []string{"crates.io", "static.crates.io", "index.crates.io", "github.com", ".github.com"},
+		Tools:    []string{"cargo", "rustc", "rustfmt", "git"},
+	},
 }
 
 // profileNames returns the available stack names, sorted, for error messages.
@@ -270,6 +278,9 @@ func detectStacks(absRoot string) []string {
 	}
 	if has("pyproject.toml") || has("requirements.txt") || has("setup.py") {
 		out = append(out, "python")
+	}
+	if has("Cargo.toml") {
+		out = append(out, "rust")
 	}
 	return out
 }
