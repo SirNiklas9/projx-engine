@@ -100,23 +100,52 @@ func verifyCommand(absRoot string, st store.Store) string {
 			}
 		}
 	}
-	has := func(pattern string) bool {
-		m, _ := filepath.Glob(filepath.Join(absRoot, pattern))
-		return len(m) > 0
+	has := func(patterns ...string) bool {
+		for _, p := range patterns {
+			if m, _ := filepath.Glob(filepath.Join(absRoot, p)); len(m) > 0 {
+				return true
+			}
+		}
+		return false
 	}
-	switch {
-	case has("go.mod"):
-		return "go build ./... && go test ./..."
-	case has("*.sln"), has("*.csproj"):
-		return "dotnet build"
-	case has("Cargo.toml"):
-		return "cargo build && cargo test"
-	case has("pom.xml"):
-		return "mvn -q -DskipTests=false test"
-	case has("package.json"):
-		return "npm test --silent"
+	// Detect every build system present at the ROOT, not the first that matches.
+	// A first-match switch mislabels a polyglot repo by whichever marker it checks
+	// first — e.g. the gravity fork (a Rust crate with a root go.mod for its Go
+	// bindings) got `go build ./...` run against it, which can't build and failed
+	// the behavioral gate spuriously (#17). When the root is unambiguous we still
+	// auto-detect; when it's polyglot we refuse to guess and ask for an explicit
+	// `setting/verify-cmd` rather than pick the wrong language.
+	type lang struct{ name, cmd string }
+	candidates := []struct {
+		match []string
+		lang  lang
+	}{
+		{[]string{"go.mod"}, lang{"go", "go build ./... && go test ./..."}},
+		{[]string{"*.sln", "*.csproj"}, lang{"dotnet", "dotnet build"}},
+		{[]string{"Cargo.toml"}, lang{"rust", "cargo build && cargo test"}},
+		{[]string{"pom.xml"}, lang{"maven", "mvn -q -DskipTests=false test"}},
+		{[]string{"package.json"}, lang{"node", "npm test --silent"}},
 	}
-	return ""
+	var found []lang
+	for _, c := range candidates {
+		if has(c.match...) {
+			found = append(found, c.lang)
+		}
+	}
+	switch len(found) {
+	case 0:
+		return ""
+	case 1:
+		return found[0].cmd
+	default:
+		names := make([]string, len(found))
+		for i, l := range found {
+			names[i] = l.name
+		}
+		fmt.Printf("verify: multiple build systems at root (%s) — set `setting/verify-cmd` to pick one (behavioral gate skipped)\n",
+			strings.Join(names, ", "))
+		return ""
+	}
 }
 
 // runHostShell runs a (possibly compound) command on the HOST via the platform shell,
