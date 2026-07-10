@@ -136,6 +136,12 @@ func main() {
 		// Hidden: the detached background supervisor for `dispatch --run`. Runs the
 		// routed steps + verify off the trunk, updating the run manifest as it goes.
 		runDispatchSupervise(absRoot, rest)
+	case "__workflow-run":
+		// Hidden: the detached background supervisor for `workflow run --detach`. Walks
+		// the workflow steps (deps + per-step selectable gate) off the trunk, riding the
+		// SAME .projx/runs manifest so `dispatch status`, the badge, and the one-shot
+		// hook surface a detached workflow exactly like a detached dispatch.
+		runWorkflowSupervise(absRoot, rest)
 	case "mcp":
 		runMCPCmd(absRoot, rest)
 	case "impact":

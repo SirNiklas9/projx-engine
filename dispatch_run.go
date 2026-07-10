@@ -37,6 +37,12 @@ type dispatchManifest struct {
 }
 
 // dispatchStepStat is one step's routing + live status inside a manifest.
+//
+// The last three fields are populated ONLY for a detached WORKFLOW run (`workflow run
+// --detach`), which rides this very manifest rather than forking a parallel format —
+// so `dispatch status`, the statusline badge, and the one-shot surface hook treat a
+// detached workflow exactly like a detached dispatch. A plain dispatch leaves them
+// empty (all omitempty), so its on-disk shape is byte-for-byte unchanged.
 type dispatchStepStat struct {
 	Task        string `json:"task"`
 	Tier        string `json:"tier"`
@@ -45,6 +51,10 @@ type dispatchStepStat struct {
 	ProviderCmd string `json:"provider_cmd,omitempty"`
 	Role        string `json:"role,omitempty"` // per-worker ProjX scope: role the worker plays
 	State       string `json:"state"`          // pending | running | done | failed
+
+	ID   string   `json:"id,omitempty"`   // workflow: the step's handle (dep target)
+	Deps []string `json:"deps,omitempty"` // workflow: ids that must complete first
+	Gate string   `json:"gate,omitempty"` // workflow: resolved gate — conformance|behavioral|both ("" = none)
 }
 
 // workerScope is the per-worker ProjX scope the supervisor computes for ONE step:
