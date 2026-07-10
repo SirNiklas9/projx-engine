@@ -41,6 +41,7 @@ var absPathRe = regexp.MustCompile(`[A-Za-z]:[\\/][^\s"'` + "`" + `]+`)
 //     told us where the work is before we touch anything);
 //  2. the project of the last file any agent touched this session (floated scope);
 //  3. the session's own cwd project (the default).
+//
 // Always returns a directory; callers open the store there (openStore composes the
 // global floor over it, so law travels regardless of which project is active).
 func activeContextRoot(absRoot, sid, prompt string) string {
@@ -197,7 +198,66 @@ func buildStatusline(cwd, sid string) string {
 		}
 	}
 
+	// Background-dispatch badge: when `dispatch --run` has detached runs for this
+	// project, show a compact count (⚙ N running · M done) so Nick sees background
+	// work without polling `dispatch status`.
+	if db := dispatchBadge(active); db != "" {
+		b.WriteString(" " + db)
+	}
+
 	return b.String()
+}
+
+// dispatchBadge renders a compact summary of this project's background dispatch runs
+// (e.g. "⚙ 2 running · 1 done"), or "" when there is nothing to show. RUNNING runs
+// always count; FINISHED runs count only until the next-prompt hook has surfaced them
+// (Reported=false) so the badge self-clears instead of growing without bound. Cheap by
+// design — it just stats/reads the small per-run JSON manifests, no engine work — since
+// the statusline paints on every render.
+func dispatchBadge(root string) string {
+	if root == "" {
+		return ""
+	}
+	runs := listDispatchManifests(root)
+	if len(runs) == 0 {
+		return ""
+	}
+	running, done, failed := 0, 0, 0
+	for _, m := range runs {
+		switch m.State {
+		case "running":
+			running++
+		case "failed":
+			if !m.Reported {
+				failed++
+			}
+		default: // done (or any terminal state)
+			if !m.Reported {
+				done++
+			}
+		}
+	}
+	var parts []string
+	if running > 0 {
+		parts = append(parts, itoa(running)+" running")
+	}
+	if done > 0 {
+		parts = append(parts, itoa(done)+" done")
+	}
+	if failed > 0 {
+		parts = append(parts, itoa(failed)+" failed")
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	color := slGreen
+	if running > 0 {
+		color = slAmber
+	}
+	if failed > 0 {
+		color = slRed
+	}
+	return color + "⚙ " + strings.Join(parts, " · ") + slReset
 }
 
 // nearestProjxDir returns the nearest ancestor of dir (dir inclusive) that owns a
@@ -224,9 +284,10 @@ func isProjxDir(path string) bool {
 
 // statusCrumb is the tiny breadcrumb the hook writes after each event so the status
 // line can show ProjX's most recent action and the actively-touched project.
-//   A = last visible action ("ctx" | "gate")
-//   N = bytes of context injected (for A=="ctx")
-//   R = active project root (the .projx-owning dir of the last file any agent touched)
+//
+//	A = last visible action ("ctx" | "gate")
+//	N = bytes of context injected (for A=="ctx")
+//	R = active project root (the .projx-owning dir of the last file any agent touched)
 type statusCrumb struct {
 	A string `json:"a"`
 	N int    `json:"n"`

@@ -277,6 +277,51 @@ func runDispatchChild(self, absRoot string, argv []string, providerCmd string) e
 	return cmd.Run()
 }
 
+// surfaceFinishedDispatches builds a short summary of background dispatch runs that
+// have FINISHED (done|failed) but not yet been surfaced (Reported=false), then flips
+// them to Reported=true so each finished run reaches the human EXACTLY ONCE via the
+// lifecycle hook — no polling. Returns "" when there is nothing new to report. This is
+// the "next-prompt surface": the hook prepends this to the injected session context.
+func surfaceFinishedDispatches(absRoot string) string {
+	runs := listDispatchManifests(absRoot)
+	var pending []*dispatchManifest
+	for _, m := range runs {
+		if m.Reported {
+			continue
+		}
+		if m.State == "done" || m.State == "failed" {
+			pending = append(pending, m)
+		}
+	}
+	if len(pending) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("## Background dispatch finished (surfaced once)\n")
+	for _, m := range pending {
+		done := 0
+		for _, s := range m.Steps {
+			if s.State == "done" {
+				done++
+			}
+		}
+		outcome := m.State
+		if m.Verify != "" {
+			outcome += ", verify " + m.Verify
+		}
+		fmt.Fprintf(&b, "- %s: %s — %d/%d steps passed — %q\n",
+			m.ID, outcome, done, len(m.Steps), truncateDispatchMsg(m.Message, 60))
+		fmt.Fprintf(&b, "  full output: %s\n", dispatchLogPath(absRoot, m.ID))
+	}
+	// Mark reported AFTER composing so a write failure does not drop the summary; a
+	// failed flip just means it surfaces again next turn (at-least-once), never lost.
+	for _, m := range pending {
+		m.Reported = true
+		_ = writeDispatchManifest(absRoot, m)
+	}
+	return b.String()
+}
+
 // runDispatchStatus implements `dispatch status [id]`.
 func runDispatchStatus(absRoot string, args []string) {
 	if len(args) > 0 {

@@ -151,9 +151,14 @@ func handleHook(absRoot string, input []byte) (stdout, stderr string, code int) 
 
 	switch ev.Event {
 	case "SessionStart":
-		// Refresh the code map (silently), then inject the lean floor.
+		// Refresh the code map (silently), then inject the lean floor. A background
+		// dispatch that finished since last session surfaces here, once.
 		_, _, _, _ = syncMap(absRoot, nil)
-		if ctx := buildSessionContext(absRoot, sid, "", false); ctx != "" {
+		ctx := buildSessionContext(absRoot, sid, "", false)
+		if disp := surfaceFinishedDispatches(absRoot); disp != "" {
+			ctx = disp + "\n" + ctx
+		}
+		if ctx != "" {
 			return wrapProjectContext(frame(withOverrideNotice(absRoot, ctx))), "", 0
 		}
 		return "", "", 0
@@ -165,7 +170,14 @@ func handleHook(absRoot string, input []byte) (stdout, stderr string, code int) 
 		// Sessions store, working on Evolution pulls Evolution. openStore composes the
 		// global floor over whichever project, so law is injected either way.
 		root := activeContextRoot(absRoot, sid, ev.Prompt)
-		if ctx := buildSessionContext(root, sid, ev.Prompt, false); ctx != "" {
+		ctx := buildSessionContext(root, sid, ev.Prompt, false)
+		// NEXT-PROMPT SURFACE: any detached dispatch that finished but hasn't been
+		// reported gets a concise summary prepended here (and flipped Reported=true), so
+		// the background result reaches Nick on his next turn without polling.
+		if disp := surfaceFinishedDispatches(absRoot); disp != "" {
+			ctx = disp + "\n" + ctx
+		}
+		if ctx != "" {
 			return wrapProjectContext(frame(withOverrideNotice(root, ctx))), "", 0
 		}
 		return "", "", 0
