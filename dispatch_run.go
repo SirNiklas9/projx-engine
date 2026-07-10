@@ -43,7 +43,44 @@ type dispatchStepStat struct {
 	Kind        string `json:"kind"` // agent | deterministic
 	Op          string `json:"op,omitempty"`
 	ProviderCmd string `json:"provider_cmd,omitempty"`
-	State       string `json:"state"` // pending | running | done | failed
+	Role        string `json:"role,omitempty"` // per-worker ProjX scope: role the worker plays
+	State       string `json:"state"`          // pending | running | done | failed
+}
+
+// workerScope is the per-worker ProjX scope the supervisor computes for ONE step:
+// the ROLE the worker plays plus the TASK that slices its injected store context.
+// Each dispatched worker is launched under only this scope — its step's role + the
+// task-sliced contract — never the full trunk context. (The context slice itself is
+// produced downstream by compileStorePreambleForTask(task); this type is the seam
+// the supervisor uses to compute + carry the scope explicitly, per adr/dispatch-run-
+// worker-permissions "workers carry ProjX scope".)
+type workerScope struct {
+	Role string
+	Task string
+}
+
+// scopeForStep derives the per-worker scope for a routed step: its descriptive role
+// plus the task that will slice the worker's context.
+func scopeForStep(s dispatchStepStat) workerScope {
+	return workerScope{Role: workerRoleForStep(s), Task: s.Task}
+}
+
+// workerRoleForStep derives a descriptive role label from the step's routing (its
+// tier/kind). This is an OBSERVABILITY/scoping label injected into the worker's
+// context so it knows the narrow role it was spawned for; the gate-exemption signal
+// stays PROJX_ROLE=worker regardless.
+func workerRoleForStep(s dispatchStepStat) string {
+	switch {
+	case s.Kind == "deterministic":
+		if s.Op != "" {
+			return "operator:" + s.Op
+		}
+		return "operator"
+	case s.Tier != "" && s.Tier != "agent":
+		return s.Tier + " worker"
+	default:
+		return "worker"
+	}
 }
 
 func dispatchRunsDir(absRoot string) string { return filepath.Join(absRoot, ".projx", "runs") }
@@ -131,14 +168,16 @@ func startDetachedDispatch(absRoot string, steps []dispatchStep, message string)
 		Steps:   make([]dispatchStepStat, 0, len(steps)),
 	}
 	for _, s := range steps {
-		m.Steps = append(m.Steps, dispatchStepStat{
+		stat := dispatchStepStat{
 			Task:        s.Task,
 			Tier:        stepTier(s.Decision),
 			Kind:        s.Decision.Kind,
 			Op:          s.Decision.Op,
 			ProviderCmd: s.Decision.ProviderCmd,
 			State:       "pending",
-		})
+		}
+		stat.Role = workerRoleForStep(stat) // per-worker ProjX scope (role) computed up front
+		m.Steps = append(m.Steps, stat)
 	}
 	if err := writeDispatchManifest(absRoot, m); err != nil {
 		fmt.Fprintf(os.Stderr, "dispatch: cannot write run manifest: %v\n", err)
@@ -204,10 +243,18 @@ func runDispatchSupervise(absRoot string, args []string) {
 
 		var stepErr error
 		if st.Kind == "deterministic" {
-			stepErr = runDispatchChild(self, absRoot, deterministicStepArgs(st.Op), "")
+			stepErr = runDispatchChild(self, absRoot, deterministicStepArgs(st.Op), "", nil)
 		} else {
 			agentWork = true
-			stepErr = runDispatchChild(self, absRoot, []string{"agent", "run", "--task", st.Task, "--", st.Task}, st.ProviderCmd)
+			// Per-worker ProjX scope: the child is launched with --task <this step> so
+			// its injected store context is SLICED to this step (compileStorePreambleForTask),
+			// and PROJX_WORKER_ROLE carries the step's role so the worker knows the narrow
+			// job it was spawned for — not the whole trunk context.
+			sc := scopeForStep(*st)
+			stepErr = runDispatchChild(self, absRoot,
+				[]string{"agent", "run", "--task", sc.Task, "--", sc.Task},
+				st.ProviderCmd,
+				[]string{"PROJX_WORKER_ROLE=" + sc.Role})
 		}
 		if stepErr != nil {
 			st.State = "failed"
@@ -226,7 +273,7 @@ func runDispatchSupervise(absRoot string, args []string) {
 		// leave verify unset; the run already failed at a step
 	case agentWork:
 		fmt.Printf("\n── dispatch %s: verifying result ──\n", id)
-		if err := runDispatchChild(self, absRoot, []string{"verify"}, ""); err != nil {
+		if err := runDispatchChild(self, absRoot, []string{"verify"}, "", nil); err != nil {
 			m.Verify = "failed"
 			failed = true
 		} else {
@@ -261,8 +308,9 @@ func deterministicStepArgs(op string) []string {
 
 // runDispatchChild runs one projx-engine subcommand as a child and waits for it.
 // providerCmd, when set, becomes PROJX_AGENT_CMD so the agent launcher uses the
-// tier the router chose for this step.
-func runDispatchChild(self, absRoot string, argv []string, providerCmd string) error {
+// tier the router chose for this step. extraEnv carries the per-worker scope (e.g.
+// PROJX_WORKER_ROLE) so each child is launched under only its step's scope.
+func runDispatchChild(self, absRoot string, argv []string, providerCmd string, extraEnv []string) error {
 	full := append([]string{"--root", absRoot}, argv...)
 	cmd := exec.Command(self, full...)
 	cmd.Dir = absRoot
@@ -273,6 +321,7 @@ func runDispatchChild(self, absRoot string, argv []string, providerCmd string) e
 	if providerCmd != "" {
 		env = append(env, "PROJX_AGENT_CMD="+providerCmd)
 	}
+	env = append(env, extraEnv...)
 	cmd.Env = env
 	return cmd.Run()
 }

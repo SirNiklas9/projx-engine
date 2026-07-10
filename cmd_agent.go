@@ -191,6 +191,10 @@ func runAgentCmd(absRoot string, args []string) {
 		preamble = compileStorePreamble(st)
 	}
 	st.Close()
+	// Per-worker ProjX scope: when this launch is a dispatched step (PROJX_WORKER_ROLE
+	// set by the supervisor), prepend the role banner so the worker's injected context
+	// is scoped to its step's ROLE + the task-sliced knowledge above — not the full trunk.
+	preamble = applyWorkerRole(preamble, workerRoleLabel())
 
 	ctxFile, ctxWriteErr := writeAgentContextText(absRoot, preamble)
 	if ctxWriteErr != nil {

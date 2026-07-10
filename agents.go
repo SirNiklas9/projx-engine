@@ -130,6 +130,7 @@ func prepareAgentContext(absRoot, task string) (ctxFile string, env map[string]s
 		preamble = compileStorePreamble(st)
 	}
 	st.Close()
+	preamble = applyWorkerRole(preamble, workerRoleLabel()) // per-worker role scope, if set
 	ctxFile, _ = writeAgentContextText(absRoot, preamble)
 	env = map[string]string{
 		"PROJX_STORE_CONTEXT": preamble,
@@ -140,6 +141,31 @@ func prepareAgentContext(absRoot, task string) (ctxFile string, env map[string]s
 		env["PROJX_STORE_CONTEXT_FILE"] = ctxFile
 	}
 	return ctxFile, env
+}
+
+// workerRoleLabel returns the descriptive role a launched worker plays, read from
+// PROJX_WORKER_ROLE (set per dispatched step by the supervisor). Defaults to the
+// generic "worker". This is an OBSERVABILITY/scoping label only — the gate-exemption
+// signal stays PROJX_ROLE=worker regardless.
+func workerRoleLabel() string {
+	if r := strings.TrimSpace(os.Getenv("PROJX_WORKER_ROLE")); r != "" {
+		return r
+	}
+	return "worker"
+}
+
+// applyWorkerRole prepends a one-line role banner to a compiled preamble when the
+// role is a SPECIFIC dispatched-step role (not the generic "worker"), so the worker's
+// injected context visibly states the narrow scope it was spawned for. Combined with
+// the task-slice (compileStorePreambleForTask), this is the per-worker ProjX scope:
+// role + step-relevant knowledge, not the whole trunk context.
+func applyWorkerRole(preamble, role string) string {
+	role = strings.TrimSpace(role)
+	if role == "" || role == "worker" {
+		return preamble
+	}
+	return "# Dispatched-worker scope — your role: " + role +
+		". You are scoped to THIS task only; act within it.\n\n" + preamble
 }
 
 // agentLaunch resolves the agent command AND prepares the store context in one
