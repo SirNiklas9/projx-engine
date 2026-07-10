@@ -120,6 +120,21 @@ func runAgentCmd(absRoot string, args []string) {
 	// --allow flags still extend it.
 	effectiveAllowBins := dedupStrings(append(append([]string{"git", "projx-engine"}, workerBins...), allowBins...))
 
+	// Language-aware sandbox (Task #18 — the sandbox half of the language-aware gate):
+	// detect the task/repo language and GRANT that language's declared toolchain +
+	// net-allow on the fly, so a worker whose toolchain would otherwise be "red"
+	// (e.g. a Rust task with no cargo in the allow-list) can actually run. Additive +
+	// safe: only the detected stacks' PROFILE-declared tools/hosts are granted — the
+	// sandbox is never widened beyond the profile. A Rust repo/task gets cargo +
+	// crates.io; a Go repo still gets go; etc.
+	langTools, langHosts := profileGrants(detectStacksForTask(absRoot, task))
+	if len(langTools) > 0 {
+		effectiveAllowBins = dedupStrings(append(effectiveAllowBins, langTools...))
+	}
+	if len(langHosts) > 0 {
+		allowHosts = dedupStrings(append(allowHosts, langHosts...))
+	}
+
 	// ── Step 2: resolve the agent command (BEFORE any jail/PATH change) ───────
 	// Capture the real PATH now, before we modify anything.
 	realPath := os.Getenv("PATH")

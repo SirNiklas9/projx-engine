@@ -285,6 +285,80 @@ func detectStacks(absRoot string) []string {
 	return out
 }
 
+// detectStacksForTask infers which language stacks a DISPATCHED WORKER needs so its
+// sandbox can be granted the matching toolchain on the fly (Task #18 — the sandbox
+// half of the language-aware gate). It unions two signals: the repo's marker files
+// (detectStacks) AND keyword hints in the task text (so "port this to Rust" grants
+// cargo even before a Cargo.toml exists). Deduped, order-stable. Additive + safe: the
+// caller only ever GRANTS these stacks' PROFILE-declared tools/hosts, never wider.
+func detectStacksForTask(absRoot, task string) []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(names ...string) {
+		for _, n := range names {
+			if n != "" && !seen[n] {
+				seen[n] = true
+				out = append(out, n)
+			}
+		}
+	}
+	add(detectStacks(absRoot)...) // repo markers first
+	add(taskStackHints(task)...)  // then task-language hints
+	return out
+}
+
+// taskStackHints scans a task string for language keywords and returns the stack
+// names they imply. Only maps to stacks that actually exist in the profile table.
+func taskStackHints(task string) []string {
+	t := strings.ToLower(task)
+	hint := map[string][]string{
+		"rust":   {"rust", "cargo", "rustc", "clippy", "crates.io", ".rs "},
+		"go":     {"golang", " go ", "gofmt", "go.mod", "go test", "go build"},
+		"node":   {"node", "npm", "pnpm", "yarn", "typescript", "javascript", "package.json", ".ts", ".js"},
+		"python": {"python", "pip", "pytest", "pyproject", "requirements.txt", ".py "},
+	}
+	var out []string
+	for stack, kws := range hint {
+		if _, ok := stacks[stack]; !ok {
+			continue
+		}
+		for _, kw := range kws {
+			if strings.Contains(t, kw) {
+				out = append(out, stack)
+				break
+			}
+		}
+	}
+	sort.Strings(out) // deterministic order (map iteration is random)
+	return out
+}
+
+// profileGrants returns the union of the named stacks' PROFILE-declared exec tools
+// and net-allow hosts — the exact toolchain a worker on that language needs. Nothing
+// beyond what profiles.go already declares is ever granted; unknown stacks are skipped.
+func profileGrants(names []string) (tools, hosts []string) {
+	toolSet, hostSet := map[string]bool{}, map[string]bool{}
+	for _, n := range names {
+		p, ok := stacks[n]
+		if !ok {
+			continue
+		}
+		for _, t := range p.Tools {
+			if t != "" && !toolSet[t] {
+				toolSet[t] = true
+				tools = append(tools, t)
+			}
+		}
+		for _, h := range p.NetAllow {
+			if h != "" && !hostSet[h] {
+				hostSet[h] = true
+				hosts = append(hosts, h)
+			}
+		}
+	}
+	return tools, hosts
+}
+
 func stackSuffix(stacks []string) string {
 	if len(stacks) == 0 {
 		return ""
