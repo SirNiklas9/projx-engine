@@ -100,6 +100,8 @@ func main() {
 		runGateCmd(absRoot, rest)
 	case "override":
 		runOverrideCmd(absRoot, rest)
+	case "mode":
+		runModeCmd(absRoot, rest)
 	case "verify":
 		runVerifyCmd(absRoot, rest)
 	case "verify-loop":
@@ -249,6 +251,9 @@ Real commands:
                                             reason (soft: dispatcher-mode, confirm-before-push,
                                             commit-style). HARD rules (secrets/off-limits) can't
                                             be overridden.
+  mode <dispatcher|cage> [on|off]         show or toggle a store-declared enforcement mode
+                                            (no on|off → print state). override-authority is
+                                            human-only and cannot be set here.
   gate add <pattern>                      add a gate rule
   gate list                               list gate rules
   gate rm <id-or-pattern>                 remove a gate rule
