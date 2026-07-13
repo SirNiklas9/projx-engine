@@ -24,7 +24,9 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
+	"time"
 
 	store "github.com/SirNiklas9/projx-store"
 )
@@ -205,7 +207,245 @@ func buildStatusline(cwd, sid string) string {
 		b.WriteString(" " + db)
 	}
 
+	// Multi-agent live view (Step 1+2 of the statusline-multiagent plan): one line per
+	// RUNNING background agent, across ALL projects. The badge above is the header; each
+	// running dispatch/workflow adds a line below it (Claude Code paints multi-line
+	// stdout). Exactly one agent renders FAT — chosen by the focus pin, else the agent in
+	// the current scope, else the sole agent — and the rest render lean. Purely additive:
+	// with nothing dispatched this returns "" and the status line stays a single badge.
+	if lines := agentLines(active, readFocus()); lines != "" {
+		b.WriteString("\n")
+		b.WriteString(lines)
+	}
+
 	return b.String()
+}
+
+// runningAgent is one live background agent for the multi-line view: a RUNNING dispatch
+// or detached-workflow manifest in some project, plus its currently-executing step.
+type runningAgent struct {
+	root     string
+	project  string
+	m        *dispatchManifest
+	cur      *dispatchStepStat // currently-running step (nil only if the manifest has no steps)
+	curIndex int               // 1-based index of cur within m.Steps (0 when none)
+	total    int
+}
+
+// agentLines renders the multi-line block: gather running agents across projects, decide
+// which one is fat, and render one line each. Returns "" when nothing is running.
+func agentLines(active, focusSel string) string {
+	agents := gatherRunningAgents(active)
+	if len(agents) == 0 {
+		return ""
+	}
+	fat := pickFatAgent(agents, active, focusSel)
+	var sb strings.Builder
+	for i, a := range agents {
+		if i > 0 {
+			sb.WriteString("\n")
+		}
+		if i == fat {
+			sb.WriteString(renderFatAgent(a))
+		} else {
+			sb.WriteString(renderLeanAgent(a))
+		}
+	}
+	return sb.String()
+}
+
+// gatherRunningAgents scans the current scope's own project plus every project in the
+// global dispatch-root index, collecting one runningAgent per RUNNING manifest. Cheap by
+// design — it only reads the small per-run JSON manifests (no store open, no engine work)
+// — so it is safe on every statusline render. Deterministically ordered (project, then
+// start time) so the lines don't jump around between renders.
+func gatherRunningAgents(active string) []runningAgent {
+	roots := dispatchRoots()
+	roots = append(roots, active) // the scope's own run may predate the global index write
+	seen := map[string]bool{}
+	var agents []runningAgent
+	for _, r := range roots {
+		if r == "" {
+			continue
+		}
+		k := normRoot(r)
+		if seen[k] {
+			continue
+		}
+		seen[k] = true
+		for _, m := range listDispatchManifests(r) {
+			if m.State != "running" {
+				continue
+			}
+			cur, idx := currentStep(m)
+			agents = append(agents, runningAgent{
+				root:     r,
+				project:  filepath.Base(r),
+				m:        m,
+				cur:      cur,
+				curIndex: idx,
+				total:    len(m.Steps),
+			})
+		}
+	}
+	sort.Slice(agents, func(i, j int) bool {
+		if agents[i].project != agents[j].project {
+			return agents[i].project < agents[j].project
+		}
+		return agents[i].m.Started.Before(agents[j].m.Started)
+	})
+	return agents
+}
+
+// currentStep returns the manifest's active step (the running one; else the most recent
+// completed; else the first) and its 1-based index.
+func currentStep(m *dispatchManifest) (*dispatchStepStat, int) {
+	if m == nil || len(m.Steps) == 0 {
+		return nil, 0
+	}
+	for i := range m.Steps {
+		if m.Steps[i].State == "running" {
+			return &m.Steps[i], i + 1
+		}
+	}
+	for i := len(m.Steps) - 1; i >= 0; i-- {
+		if m.Steps[i].State == "done" {
+			return &m.Steps[i], i + 1
+		}
+	}
+	return &m.Steps[0], 1
+}
+
+// pickFatAgent selects the single agent to render fat: the focus pin wins, else the agent
+// whose project == the current scope, else — only when unambiguous — the sole agent. -1
+// means no agent is fat (all lean).
+func pickFatAgent(agents []runningAgent, active, focusSel string) int {
+	if focusSel != "" {
+		for i, a := range agents {
+			if agentMatchesFocus(a, focusSel) {
+				return i
+			}
+		}
+	}
+	if active != "" {
+		for i, a := range agents {
+			if pathEq(a.root, active) {
+				return i
+			}
+		}
+	}
+	if len(agents) == 1 {
+		return 0
+	}
+	return -1
+}
+
+// agentMatchesFocus reports whether a focus selector picks this agent. A selector matches
+// by dispatch id, project name, or the current step's role — whichever the human typed.
+func agentMatchesFocus(a runningAgent, sel string) bool {
+	sel = strings.TrimSpace(sel)
+	if sel == "" {
+		return false
+	}
+	if strings.EqualFold(sel, a.m.ID) || strings.EqualFold(sel, a.project) {
+		return true
+	}
+	if a.cur != nil && a.cur.Role != "" && strings.EqualFold(sel, a.cur.Role) {
+		return true
+	}
+	return false
+}
+
+// renderLeanAgent is the default line: project · current op · state (~3 fields, dim).
+func renderLeanAgent(a runningAgent) string {
+	return slDim + "  ▸ " + a.project + " · " + curOpLabel(a) + " · " + runStateLabel(a) + slReset
+}
+
+// renderFatAgent is the ONE focused line: richer fields (op, step, role/tier, elapsed,
+// branch, verify), rendered in the accent color so it reads as the foreground agent.
+func renderFatAgent(a runningAgent) string {
+	fields := []string{curOpLabel(a), runStateLabel(a)}
+	if role := agentRole(a); role != "" {
+		fields = append(fields, role)
+	}
+	fields = append(fields, agentElapsed(a))
+	if br := branchOf(a.root); br != "" {
+		fields = append(fields, "⎇ "+br)
+	}
+	if a.m.Verify != "" {
+		fields = append(fields, "verify:"+a.m.Verify)
+	}
+	return slAccent + "  ★ " + slBold + a.project + slReset + slAccent + " · " + strings.Join(fields, " · ") + slReset
+}
+
+// curOpLabel is the "currently-touched file / op" cell: a deterministic step shows its op,
+// an agent step shows its (truncated) task, and a not-yet-started manifest shows "starting".
+func curOpLabel(a runningAgent) string {
+	if a.cur == nil {
+		return "starting"
+	}
+	if a.cur.Op != "" {
+		return a.cur.Op
+	}
+	if t := truncateDispatchMsg(a.cur.Task, 32); t != "" {
+		return t
+	}
+	return "working"
+}
+
+// runStateLabel shows progress: "run k/n" for a multi-step run, "running" for a single step.
+func runStateLabel(a runningAgent) string {
+	if a.total > 1 {
+		return "run " + itoa(a.curIndex) + "/" + itoa(a.total)
+	}
+	return "running"
+}
+
+// agentRole is the fat-line role/tier cell (the per-worker ProjX scope label).
+func agentRole(a runningAgent) string {
+	if a.cur == nil {
+		return ""
+	}
+	if a.cur.Role != "" {
+		return a.cur.Role
+	}
+	return a.cur.Tier
+}
+
+// agentElapsed is the fat-line elapsed-time cell.
+func agentElapsed(a runningAgent) string { return compactDur(time.Since(a.m.Started)) }
+
+// compactDur renders a duration tersely for the bar: 45s, 3m, 1h2m.
+func compactDur(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	s := int(d.Seconds())
+	if s < 60 {
+		return itoa(s) + "s"
+	}
+	m := s / 60
+	if m < 60 {
+		return itoa(m) + "m"
+	}
+	return itoa(m/60) + "h" + itoa(m%60) + "m"
+}
+
+// branchOf reads a repo's current branch from .git/HEAD (a cheap file read, no git exec).
+// Returns the branch name, a short sha for a detached HEAD, or "" when not a git repo.
+func branchOf(root string) string {
+	data, err := os.ReadFile(filepath.Join(root, ".git", "HEAD"))
+	if err != nil {
+		return ""
+	}
+	s := strings.TrimSpace(string(data))
+	if rest, ok := strings.CutPrefix(s, "ref: refs/heads/"); ok {
+		return rest
+	}
+	if len(s) >= 7 {
+		return s[:7]
+	}
+	return ""
 }
 
 // dispatchBadge renders a compact summary of this project's background dispatch runs

@@ -193,6 +193,7 @@ func startDetachedDispatch(absRoot string, steps []dispatchStep, message string)
 		fmt.Fprintf(os.Stderr, "dispatch: cannot write run manifest: %v\n", err)
 		os.Exit(1)
 	}
+	registerDispatchRoot(absRoot) // make this project's live runs visible to the cross-project statusline
 
 	self, err := os.Executable()
 	if err != nil {

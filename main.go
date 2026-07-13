@@ -102,6 +102,8 @@ func main() {
 		runOverrideCmd(absRoot, rest)
 	case "mode":
 		runModeCmd(absRoot, rest)
+	case "focus":
+		runFocusCmd(absRoot, rest)
 	case "verify":
 		runVerifyCmd(absRoot, rest)
 	case "verify-loop":
@@ -254,6 +256,9 @@ Real commands:
   mode <dispatcher|cage> [on|off]         show or toggle a store-declared enforcement mode
                                             (no on|off → print state). override-authority is
                                             human-only and cannot be set here.
+  focus [<selector>|--clear|--show]       pin which running agent the statusline renders FAT
+                                            (match by dispatch id | project | role); no arg
+                                            shows it, --clear returns to fat-by-current-scope
   gate add <pattern>                      add a gate rule
   gate list                               list gate rules
   gate rm <id-or-pattern>                 remove a gate rule
