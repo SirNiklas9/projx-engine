@@ -135,6 +135,28 @@ func Decide(task string, cfg Config) Decision {
 // (store.RouteDecide): per-message @-override > standing pin/floor > keyword classifier
 // > cheap model triage > default. Pass triage=nil for deterministic-only routing.
 func DecideWithStore(s store.Store, task string, cfg Config, triage store.TriageFunc) Decision {
+	// ── 0. MUTATION VETO ─────────────────────────────────────────────────────
+	// A task that asks for a CHANGE must never fall into the deterministic-op
+	// triage below, whatever else it happens to mention.
+	//
+	// Why this exists: the arms below are bare substring matches, so a perfectly
+	// ordinary edit task — "Add the two missing registrations ... VERIFY: run go
+	// build" — matched on the word "verify" and was silently downgraded to a
+	// boundary check. The op then ran the build, reported "verify: behavioral
+	// gate PASSED", edited NOTHING, and the dispatch reported `done`. It looked
+	// exactly like success. That is the worst possible failure for a dispatcher
+	// whose whole contract is "agents mutate, the trunk verifies the diff":
+	// nothing mutated, and the report said otherwise.
+	//
+	// Deterministic ops are read-only by construction, so they can only ever be
+	// the right answer for a read-only request. When a task says BOTH "change
+	// this" and "verify it", the change is the job and the verify is an
+	// acceptance criterion — routing to the criterion and skipping the job
+	// inverts the request.
+	if isMutationTask(task) {
+		return decideAgent(s, task, cfg, triage)
+	}
+
 	// ── 1. DETERMINISTIC-FIRST triage ────────────────────────────────────────
 	// Each arm maps a set of obvious keywords to an engine op.  Keywords are
 	// checked in priority order; first match wins.
@@ -167,8 +189,17 @@ func DecideWithStore(s store.Store, task string, cfg Config, triage store.Triage
 	}
 
 	// ── 2. AGENT path: the DECIDER (precedence ladder) picks the tier ─────────
-	// The risk-floor (correctness-critical → deep-reasoning) is applied inside
-	// store.RouteDecide, so route/run/dispatch all get it consistently.
+	return decideAgent(s, task, cfg, triage)
+}
+
+// decideAgent runs the DECIDER (precedence ladder) and resolves the provider
+// command. Split out of DecideWithStore so the mutation veto can reach the agent
+// path without duplicating the ladder — one definition, so route/run/dispatch
+// keep agreeing with each other.
+//
+// The risk-floor (correctness-critical → deep-reasoning) is applied inside
+// store.RouteDecide, so route/run/dispatch all get it consistently.
+func decideAgent(s store.Store, task string, cfg Config, triage store.TriageFunc) Decision {
 	rd := store.RouteDecide(s, task, triage)
 	cmd := rd.Cmd // store KRoute tier-map wins if set…
 	if cmd == "" {
@@ -181,4 +212,72 @@ func DecideWithStore(s store.Store, task string, cfg Config, triage store.Triage
 		Reason:      rd.Reason,
 		Source:      rd.Source,
 	}
+}
+
+// mutationVerbs are the openers of a task that asks for a CHANGE. Matched as
+// whole words against the task's LEADING clause, not anywhere in the body: a
+// read-only request like "verify nothing added a new export" mentions "add" but
+// asks for nothing to change, while "Add the missing registration" leads with it.
+//
+// Deliberately conservative. A false positive costs an agent run on something an
+// op could have answered — cheap, visible, correctable. A false negative silently
+// turns a code change into a no-op that reports success, which is what happened
+// on 2026-07-16 and cost real debugging time on payment code. Prefer the cheap
+// failure.
+var mutationVerbs = []string{
+	"add", "insert", "append", "create", "write", "implement",
+	"fix", "change", "edit", "update", "modify", "patch",
+	"remove", "delete", "drop", "rename", "move",
+	"refactor", "rewrite", "replace", "wire", "register",
+	"bug fix", "bugfix",
+}
+
+// isMutationTask reports whether the task's opening asks for a change.
+//
+// Only the leading clause is considered — up to the first sentence break — so an
+// acceptance criterion further down ("... then verify with go build") cannot flip
+// the decision, and a genuinely read-only task that merely mentions a verb in
+// passing is not dragged onto the agent path.
+func isMutationTask(task string) bool {
+	lead := strings.ToLower(strings.TrimSpace(task))
+	// The lead clause: whichever sentence break comes first.
+	for _, brk := range []string{".", ":", ";", "\n", " — ", " - "} {
+		if i := strings.Index(lead, brk); i > 0 && i < len(lead) {
+			lead = lead[:i]
+		}
+	}
+	for _, v := range mutationVerbs {
+		if hasWord(lead, v) {
+			return true
+		}
+	}
+	return false
+}
+
+// hasWord reports whether s contains tok as a WHOLE word. Substring matching is
+// what created the bug this guard exists for ("verify" inside a sentence), so
+// the guard itself must not repeat it — "readd" must not match "add".
+func hasWord(s, tok string) bool {
+	i := 0
+	for {
+		j := strings.Index(s[i:], tok)
+		if j < 0 {
+			return false
+		}
+		start := i + j
+		end := start + len(tok)
+		beforeOK := start == 0 || !isWordByte(s[start-1])
+		afterOK := end == len(s) || !isWordByte(s[end])
+		if beforeOK && afterOK {
+			return true
+		}
+		i = start + 1
+		if i >= len(s) {
+			return false
+		}
+	}
+}
+
+func isWordByte(b byte) bool {
+	return b == '_' || (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')
 }
