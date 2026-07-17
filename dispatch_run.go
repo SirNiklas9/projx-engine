@@ -49,8 +49,9 @@ type dispatchStepStat struct {
 	Kind        string `json:"kind"` // agent | deterministic
 	Op          string `json:"op,omitempty"`
 	ProviderCmd string `json:"provider_cmd,omitempty"`
-	Role        string `json:"role,omitempty"` // per-worker ProjX scope: role the worker plays
-	State       string `json:"state"`          // pending | running | done | failed
+	Role        string `json:"role,omitempty"`    // per-worker ProjX scope: role the worker plays
+	State       string `json:"state"`             // pending | running | done | failed
+	Mutated     string `json:"mutated,omitempty"` // yes | no | unknown — did the step CHANGE the working tree?
 
 	ID   string   `json:"id,omitempty"`   // workflow: the step's handle (dep target)
 	Deps []string `json:"deps,omitempty"` // workflow: ids that must complete first
@@ -252,6 +253,11 @@ func runDispatchSupervise(absRoot string, args []string) {
 		_ = writeDispatchManifest(absRoot, m)
 		fmt.Printf("\n── dispatch %s: step %d/%d [%s] %s\n", id, i+1, len(m.Steps), st.Tier, st.Task)
 
+		// GROUND TRUTH, before/after: whether the repo changed is decided by git, not by
+		// the step's own account of itself. Captured for BOTH kinds — a deterministic op
+		// that quietly no-ops is precisely the failure this detects.
+		beforeGit, beforeOK := gitFingerprint(absRoot)
+
 		var stepErr error
 		if st.Kind == "deterministic" {
 			stepErr = runDispatchChild(self, absRoot, deterministicStepArgs(st.Op), "", nil)
@@ -267,6 +273,11 @@ func runDispatchSupervise(absRoot string, args []string) {
 				st.ProviderCmd,
 				[]string{"PROJX_WORKER_ROLE=" + sc.Role})
 		}
+		// Record the verdict even for a FAILED step: a step that half-wrote the tree before
+		// dying is worth knowing about, and it costs one git call either way.
+		afterGit, afterOK := gitFingerprint(absRoot)
+		st.Mutated = mutationBetween(beforeGit, beforeOK, afterGit, afterOK)
+
 		if stepErr != nil {
 			st.State = "failed"
 			failed = true
@@ -276,6 +287,13 @@ func runDispatchSupervise(absRoot string, args []string) {
 		}
 		st.State = "done"
 		_ = writeDispatchManifest(absRoot, m)
+		if silentAgentStep(*st) {
+			// Loud at the moment it happens, not just in the final tally — this line is
+			// what makes a future misroute self-announcing in the run log.
+			fmt.Printf("dispatch %s: ⚠ step %d ran as an AGENT but changed NOTHING — no-op misroute or refusal; read the output above.\n", id, i+1)
+		} else if stepChangedNothing(*st) {
+			fmt.Printf("dispatch %s: step %d changed nothing (%s op).\n", id, i+1, orDashDispatch(st.Op))
+		}
 	}
 
 	// Verify gate on the RESULT — mirrors the old inline gate, now off the trunk.
@@ -337,6 +355,127 @@ func runDispatchChild(self, absRoot string, argv []string, providerCmd string, e
 	return cmd.Run()
 }
 
+// Mutation values recorded on a step: did the repo actually CHANGE?
+const (
+	mutatedYes     = "yes"
+	mutatedNo      = "no"
+	mutatedUnknown = "unknown"
+)
+
+// gitOutput runs one read-only git command in absRoot and returns its trimmed
+// stdout. ok=false means git is absent, absRoot is not a repo, or git errored —
+// every caller treats that as "unknown", never as a failure.
+func gitOutput(absRoot string, args ...string) (string, bool) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = absRoot
+	cmd.Stdin = nil
+	out, err := cmd.Output() // stderr discarded on purpose: a non-repo is not an error here
+	if err != nil {
+		return "", false
+	}
+	return strings.TrimSpace(string(out)), true
+}
+
+// gitFingerprint captures the repo's state as a comparable string: HEAD's sha plus
+// the porcelain working-tree status. Both halves matter — status alone would call a
+// step that COMMITTED its work "no changes", and HEAD alone would miss uncommitted
+// edits. Returns ok=false when there is no git to ask (see gitOutput).
+//
+// This is GROUND TRUTH: it is what the repo looks like, not what the step claims it
+// did. It works identically for agent steps and deterministic ops, which is the whole
+// reason the mutation signal is taken from git rather than from the step's own report.
+func gitFingerprint(absRoot string) (string, bool) {
+	if _, ok := gitOutput(absRoot, "rev-parse", "--is-inside-work-tree"); !ok {
+		return "", false
+	}
+	// HEAD is absent (and rev-parse fails) in a repo with no commits yet — that is a
+	// legitimate repo, so tolerate the miss and let the status half carry the signal.
+	head, _ := gitOutput(absRoot, "rev-parse", "HEAD")
+	status, ok := gitOutput(absRoot, "status", "--porcelain")
+	if !ok {
+		return "", false
+	}
+	return head + "\x00" + dropEngineStateLines(status), true
+}
+
+// dropEngineStateLines removes the engine's OWN bookkeeping from a porcelain status.
+// The supervisor rewrites .projx/runs/<id>.json on every step transition, so without
+// this every step would fingerprint as "mutated" purely because dispatch was watching
+// itself. This repo gitignores .projx/ (so the lines never appear), but a project that
+// does not must not get a false "yes" — the filter makes the signal independent of
+// whether .projx happens to be ignored.
+func dropEngineStateLines(status string) string {
+	if status == "" {
+		return ""
+	}
+	var keep []string
+	for _, ln := range strings.Split(status, "\n") {
+		// Porcelain v1 is "XY <path>"; a rename is "R  <old> -> <new>". Path starts at 3.
+		p := ln
+		if len(ln) > 3 {
+			p = ln[3:]
+		}
+		p = strings.TrimPrefix(strings.TrimSpace(p), "\"")
+		if strings.HasPrefix(p, ".projx/") || p == ".projx" {
+			continue
+		}
+		keep = append(keep, ln)
+	}
+	return strings.Join(keep, "\n")
+}
+
+// mutationBetween turns two fingerprints into the recorded mutation value. Unknown is
+// contagious on purpose: if either side could not be read we say so rather than guess,
+// because a wrong "no" is exactly the silent lie this whole change exists to kill.
+func mutationBetween(before string, beforeOK bool, after string, afterOK bool) string {
+	if !beforeOK || !afterOK {
+		return mutatedUnknown
+	}
+	if before == after {
+		return mutatedNo
+	}
+	return mutatedYes
+}
+
+// stepChangedNothing reports a step that PROVABLY did not touch the repo. Unknown is
+// deliberately excluded — we only make the claim when git actually told us.
+func stepChangedNothing(s dispatchStepStat) bool { return s.Mutated == mutatedNo }
+
+// silentAgentStep is the loud case: routing sent this step to an AGENT — the entire
+// point of which was to change code — and the repo came back byte-identical. That is
+// either a no-op misroute (the Jul 16 incident: a task keyword-swallowed into a
+// read-only op, reported as success) or an agent refusal. Both need a human to look;
+// neither is an engine error, which is why this is a LABEL + WARNING and not a failed
+// state. See stepOutcomeLabel.
+func silentAgentStep(s dispatchStepStat) bool {
+	return s.Kind == "agent" && s.State == "done" && stepChangedNothing(s)
+}
+
+// stepOutcomeLabel renders a step's state at its HONEST strength. A bare "done" reads
+// as "the work happened" — so a step that changed nothing must not get one. Unknown
+// keeps the plain label: we have no evidence either way, and the manifest field records
+// the uncertainty for anyone who looks.
+func stepOutcomeLabel(s dispatchStepStat) string {
+	if s.State != "done" || !stepChangedNothing(s) {
+		return s.State
+	}
+	if s.Kind == "agent" {
+		return "done (NO CHANGES)"
+	}
+	return "done (no changes)"
+}
+
+// silentAgentSteps returns the 1-based indexes of every agent step that changed nothing.
+func silentAgentSteps(m *dispatchManifest) []int {
+	var out []int
+	for i, s := range m.Steps {
+		if silentAgentStep(s) {
+			out = append(out, i+1)
+		}
+	}
+	return out
+}
+
 // surfaceFinishedDispatches builds a short summary of background dispatch runs that
 // have FINISHED (done|failed) but not yet been surfaced (Reported=false), then flips
 // them to Reported=true so each finished run reaches the human EXACTLY ONCE via the
@@ -369,8 +508,24 @@ func surfaceFinishedDispatches(absRoot string) string {
 		if m.Verify != "" {
 			outcome += ", verify " + m.Verify
 		}
-		fmt.Fprintf(&b, "- %s: %s — %d/%d steps passed — %q\n",
-			m.ID, outcome, done, len(m.Steps), truncateDispatchMsg(m.Message, 60))
+		// "N/N steps passed" is the sentence that made the Jul 16 no-ops look like wins;
+		// qualify it the moment git says some of those steps changed nothing.
+		quiet := 0
+		for _, s := range m.Steps {
+			if s.State == "done" && stepChangedNothing(s) {
+				quiet++
+			}
+		}
+		tally := fmt.Sprintf("%d/%d steps passed", done, len(m.Steps))
+		if quiet > 0 {
+			tally += fmt.Sprintf(" (%d changed nothing)", quiet)
+		}
+		fmt.Fprintf(&b, "- %s: %s — %s — %q\n",
+			m.ID, outcome, tally, truncateDispatchMsg(m.Message, 60))
+		if n := silentAgentSteps(m); len(n) > 0 {
+			fmt.Fprintf(&b, "  ⚠ step(s) %s ran as an AGENT and changed NOTHING — no-op misroute or refusal. Needs a human.\n",
+				joinInts(n))
+		}
 		fmt.Fprintf(&b, "  full output: %s\n", dispatchLogPath(absRoot, m.ID))
 	}
 	// Mark reported AFTER composing so a write failure does not drop the summary; a
@@ -409,6 +564,13 @@ func runDispatchStatus(absRoot string, args []string) {
 		fmt.Printf("%-18s %-8s %-8s %d/%-5d %s\n",
 			m.ID, m.State, orDashDispatch(m.Verify), done, len(m.Steps), truncateDispatchMsg(m.Message, 46))
 	}
+	// The table's "done" column cannot say this, so say it under the table rather than
+	// let a silent agent step hide behind a healthy-looking row.
+	for _, m := range runs {
+		if n := silentAgentSteps(m); len(n) > 0 {
+			fmt.Printf("⚠ %s: %d agent step(s) changed nothing — `dispatch status %s`\n", m.ID, len(n), m.ID)
+		}
+	}
 }
 
 func printDispatchManifest(m *dispatchManifest) {
@@ -422,7 +584,13 @@ func printDispatchManifest(m *dispatchManifest) {
 		fmt.Printf("  verify:   %s\n", m.Verify)
 	}
 	for i, s := range m.Steps {
-		fmt.Printf("  %d. [%-14s] %-8s %s\n", i+1, s.Tier, s.State, s.Task)
+		fmt.Printf("  %d. [%-14s] %-17s %s\n", i+1, s.Tier, stepOutcomeLabel(s), s.Task)
+	}
+	// An agent step that changed nothing gets its own line, not a parenthetical — the
+	// label alone is easy to skim past, and this is the case that cost real debugging.
+	for _, n := range silentAgentSteps(m) {
+		fmt.Printf("  ⚠ step %d was routed to an AGENT but left the repo byte-identical.\n", n)
+		fmt.Printf("    Either it no-op'd (misroute) or it refused. Neither is visible from \"done\" — check the log.\n")
 	}
 	fmt.Printf("  log: %s\n", dispatchLogPath(mustAbsForLog(m), m.ID))
 }
@@ -443,6 +611,15 @@ func orDashDispatch(s string) string {
 		return "-"
 	}
 	return s
+}
+
+// joinInts renders step numbers for a warning line: "2" / "2, 4".
+func joinInts(ns []int) string {
+	parts := make([]string, 0, len(ns))
+	for _, n := range ns {
+		parts = append(parts, fmt.Sprintf("%d", n))
+	}
+	return strings.Join(parts, ", ")
 }
 
 func truncateDispatchMsg(s string, n int) string {
