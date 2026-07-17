@@ -18,7 +18,7 @@ require (
 
 require (
 	github.com/BananaLabs-OSS/Pulp-ext-hook v0.0.0 // indirect
-	github.com/BananaLabs-OSS/sow v0.1.0 // indirect
+	github.com/BananaLabs-OSS/sow v0.2.0 // indirect
 	github.com/bmatcuk/doublestar/v4 v4.10.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/btree v1.1.3 // indirect
@@ -66,5 +66,3 @@ replace github.com/BananaLabs-OSS/Pulp-grants => ../Pulp-grants
 replace github.com/BananaLabs-OSS/Pulp => ../Pulp
 
 replace github.com/BananaLabs-OSS/Pulp-cage => ../Pulp-cage
-
-replace github.com/BananaLabs-OSS/sow => ../sow

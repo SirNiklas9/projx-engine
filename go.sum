@@ -1,3 +1,5 @@
+github.com/BananaLabs-OSS/sow v0.2.0 h1:lfiDVrVqM+miYwtC1EUyDqy+gR+5iv2JKMbRFuRo4i0=
+github.com/BananaLabs-OSS/sow v0.2.0/go.mod h1:Hz/5P+8pc58jloPnY787qYuoocozeREaPa2bdCa24wo=
 github.com/BurntSushi/toml v1.6.0 h1:dRaEfpa2VI55EwlIW72hMRHdWouJeRF7TPYhI+AUQjk=
 github.com/BurntSushi/toml v1.6.0/go.mod h1:ukJfTF/6rtPPRCnwkur4qwRxa8vTRFBF0uk2lLoLwho=
 github.com/bmatcuk/doublestar/v4 v4.10.0 h1:zU9WiOla1YA122oLM6i4EXvGW62DvKZVxIe6TYWexEs=
