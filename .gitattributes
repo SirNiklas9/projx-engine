@@ -1,0 +1,21 @@
+# Pin text sources to LF in the working tree.
+#
+# Why this file exists:
+#   - gofmt is LF-only. It has no CRLF mode and never will.
+#   - core.autocrlf=true (set machine-wide on some dev machines) silently
+#     rewrites the WORKING TREE to CRLF on every checkout, even though the
+#     stored blobs are already LF. gofmt then flags every converted file, which
+#     trained us to treat "not gofmt-clean" as the normal state and stop
+#     formatting.
+#   - It also made `git stash` destructive: a `stash pop` rewrote every .go
+#     file to CRLF mid-edit and had to be repaired by hand.
+#
+# `eol=lf` pins the working tree to LF regardless of core.autocrlf, so gofmt
+# and git stop fighting. The stored blobs are ALREADY LF, so this changes no
+# committed content and rewrites nothing existing -- it only stops the
+# checkout-time conversion that was corrupting the working tree.
+
+*.go     text eol=lf
+go.mod   text eol=lf
+go.sum   text eol=lf
+*.md     text eol=lf
