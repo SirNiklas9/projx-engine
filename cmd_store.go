@@ -137,6 +137,44 @@ func workspaceStorePath(absRoot string) string {
 	return ""
 }
 
+// enclosingProjectRoot walks UP from start to the nearest ancestor directory that
+// owns a ".projx" directory and returns it; "" when none is found before the
+// filesystem root. Mirrors the target-based walk in targetStoreRoot (gatecheck.go):
+// a ".projx" directory is what marks a ProjX project root.
+func enclosingProjectRoot(start string) string {
+	dir := start
+	for i := 0; i < 64; i++ {
+		if fi, err := os.Stat(filepath.Join(dir, ".projx")); err == nil && fi.IsDir() {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return ""
+}
+
+// storeRoot resolves WHICH project root a store command should read/write when the
+// user did not pass --root. It auto-resolves the ENCLOSING project: walk up from the
+// cwd-derived root to the nearest ".projx" owner, so `store get <id>` (and the other
+// store subcommands) run from ANY subdirectory of a project read that project's store
+// instead of silently creating a fresh, empty <cwd>/.projx (openStoreSafe MkdirAll's
+// the dir, so a bare cwd lookup always "succeeds" against an empty store — the bug).
+// When --root was given explicitly it is honoured verbatim. When no ancestor project
+// exists (a loose dir outside any project), falls back to absRoot — preserving the
+// previous behaviour, including init creating a new project in the cwd.
+func storeRoot(absRoot string, rootExplicit bool) string {
+	if rootExplicit {
+		return absRoot
+	}
+	if r := enclosingProjectRoot(absRoot); r != "" {
+		return r
+	}
+	return absRoot
+}
+
 func runStoreCmd(absRoot string, args []string) {
 	if len(args) == 0 {
 		fmt.Fprintln(os.Stderr, "usage: store <get|list|query|commit|move|rm|log|undo|revert|cherry-pick|checkout|seed>")
@@ -264,7 +302,8 @@ func storeGet(absRoot string, args []string) {
 	defer st.Close()
 	r, ok := st.Get(id)
 	if !ok {
-		fmt.Fprintf(os.Stderr, "not found: %s\n", id)
+		fmt.Fprintf(os.Stderr, "not found: %s (searched store root %s)\n", id, absRoot)
+		fmt.Fprintf(os.Stderr, "  if the record lives in another project, pass --root <projectdir>\n")
 		os.Exit(1)
 	}
 	printRecord(r)

@@ -59,9 +59,11 @@ func main() {
 
 	// Extract global --root flag before subcommand dispatch.
 	root := "."
+	rootExplicit := false
 	for i := 0; i < len(args)-1; i++ {
 		if args[i] == "--root" {
 			root = args[i+1]
+			rootExplicit = true
 			args = append(args[:i], args[i+2:]...)
 			break
 		}
@@ -95,7 +97,10 @@ func main() {
 	case "statusline":
 		runStatuslineCmd(absRoot, rest)
 	case "store":
-		runStoreCmd(absRoot, rest)
+		// Store lookups auto-resolve the ENCLOSING project when --root is not given,
+		// so `store get <id>` from a project subdirectory reads that project's store
+		// instead of a fresh empty <cwd>/.projx (see storeRoot in cmd_store.go).
+		runStoreCmd(storeRoot(absRoot, rootExplicit), rest)
 	case "gate":
 		runGateCmd(absRoot, rest)
 	case "override":
