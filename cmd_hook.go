@@ -42,6 +42,28 @@ type hookEvent struct {
 	} `json:"tool_input"`
 }
 
+func isMutatingHookTool(name string) bool {
+	return store.IsMutatingTool(name) || strings.EqualFold(strings.TrimSpace(name), "apply_patch")
+}
+
+func hookTargetPaths(ev hookEvent) []string {
+	if !strings.EqualFold(strings.TrimSpace(ev.ToolName), "apply_patch") {
+		return nil
+	}
+	var out []string
+	for _, line := range strings.Split(ev.ToolInput.Command, "\n") {
+		line = strings.TrimSpace(line)
+		for _, prefix := range []string{"*** Add File:", "*** Update File:", "*** Delete File:", "*** Move to:"} {
+			if strings.HasPrefix(line, prefix) {
+				if p := strings.TrimSpace(strings.TrimPrefix(line, prefix)); p != "" {
+					out = append(out, p)
+				}
+			}
+		}
+	}
+	return out
+}
+
 // runHookCmd reads the hook JSON from stdin, dispatches, and exits with the right code.
 func runHookCmd(absRoot string, _ []string) {
 	// PROJX_AGENT_CONTEXT=1 (restricted mode, set inside a caged agent run) would refuse
@@ -184,6 +206,7 @@ func handleHook(absRoot string, input []byte) (stdout, stderr string, code int) 
 
 	case "PreToolUse":
 		path := ev.ToolInput.FilePath
+		targets := hookTargetPaths(ev)
 		// TARGET-based scope (adr/scope-resolution-is-target-based): the rules that apply
 		// are the ones of the project CONTAINING the file being touched, not the process
 		// cwd. Walk up from the target path to its owning .projx; fall back to cwd only
@@ -216,7 +239,7 @@ func handleHook(absRoot string, input []byte) (stdout, stderr string, code int) 
 			return "", "ProjX: override authority is not delegated. The AI may REQUEST an override but cannot grant its own. Ask the human to authorize — they delegate with `projx-engine store commit --kind gate-rule --key setting/override-authority --body on`, or run the `override` themselves. (This block is by design.)", 2
 		}
 
-		if store.IsMutatingTool(ev.ToolName) && os.Getenv("PROJX_ROLE") != "worker" {
+		if isMutatingHookTool(ev.ToolName) && os.Getenv("PROJX_ROLE") != "worker" {
 			if store.DispatcherModeOn(st) {
 				// Tier is DATA: soft = overridable with a logged reason (B); a project may
 				// retier dispatcher-mode to hard (store record Enforcement=hard) to forbid
@@ -244,12 +267,30 @@ func handleHook(absRoot string, input []byte) (stdout, stderr string, code int) 
 		if pat, denied := gateDeniedPath(st, gateRelPath(storeRoot, absRoot, path)); path != "" && denied {
 			return "", fmt.Sprintf("ProjX gate: %q is off-limits by gate rule %q.", path, pat), 2
 		}
+		for _, target := range targets {
+			targetRoot := targetStoreRoot(absRoot, target)
+			if targetRoot == storeRoot {
+				if pat, denied := gateDeniedPath(st, gateRelPath(targetRoot, absRoot, target)); denied {
+					return "", fmt.Sprintf("ProjX gate: %q is off-limits by gate rule %q.", target, pat), 2
+				}
+				continue
+			}
+			targetStore, err := openStoreSafe(targetRoot)
+			if err != nil {
+				return "", fmt.Sprintf("ProjX gate: store unavailable (%v) - failing closed, action blocked.", err), 2
+			}
+			pat, denied := gateDeniedPath(targetStore, gateRelPath(targetRoot, absRoot, target))
+			targetStore.Close()
+			if denied {
+				return "", fmt.Sprintf("ProjX gate: %q is off-limits by gate rule %q.", target, pat), 2
+			}
+		}
 		if cmd := strings.TrimSpace(ev.ToolInput.Command); cmd != "" {
 			if tok, pat, denied := bashHitsGate(st, storeRoot, absRoot, cmd); denied {
 				return "", fmt.Sprintf("ProjX gate: command references %q, off-limits by gate rule %q. Reading/printing secret material is denied.", tok, pat), 2
 			}
 		}
-		if path == "" {
+		if path == "" && len(targets) == 0 {
 			return "", "", 0 // a matched tool with no file_path → allow (gate already cleared)
 		}
 		// Auto-focus: touching a member repo's file focuses the session there, so the

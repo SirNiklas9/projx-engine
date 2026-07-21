@@ -153,6 +153,9 @@ func runGlobalBootstrap() {
 	} else {
 		fmt.Printf("  skill: already up to date → %s\n", skillPath)
 	}
+	if err := bootstrapCodex(home); err != nil {
+		die("bootstrap: install Codex adapter: %v", err)
+	}
 
 	fmt.Println("\nprojx bootstrap: done. The global ProjX hook now loads on every Claude Code session.")
 	fmt.Println("  • Make the current dir a ProjX project:  projx-engine --root . init")

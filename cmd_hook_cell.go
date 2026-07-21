@@ -76,24 +76,29 @@ func handleHookViaCell(base string, input []byte) (stdout, stderr string, code i
 		// Trunk-dispatch gate (same as the native path): deny file-mutating tools in the
 		// TRUNK when dispatcher-mode is on; a projx-spawned worker (PROJX_ROLE=worker) is
 		// exempt. Role is read locally; the cell owns the on/off setting.
-		if store.IsMutatingTool(ev.ToolName) && os.Getenv("PROJX_ROLE") != "worker" {
+		if isMutatingHookTool(ev.ToolName) && os.Getenv("PROJX_ROLE") != "worker" {
 			if m, ok := cellReq("GET", base+"/api/gate/dispatcher"); ok {
 				if on, _ := m["on"].(bool); on {
 					return "", "ProjX dispatcher-mode: the trunk dispatches, it does not edit. Route this to a tier-agent — `projx-engine dispatch --run \"<task>\"` — or turn it off with `projx-engine store commit --kind gate-rule --key setting/dispatcher-mode --body off`.", 2
 				}
 			}
 		}
-		p := ev.ToolInput.FilePath
-		if p == "" {
+		paths := hookTargetPaths(ev)
+		if ev.ToolInput.FilePath != "" {
+			paths = append(paths, ev.ToolInput.FilePath)
+		}
+		if len(paths) == 0 {
 			return "", "", 0
 		}
-		if m, ok := cellReq("GET", base+"/api/gate/check?path="+url.QueryEscape(p)); ok {
-			if denied, _ := m["denied"].(bool); denied {
-				pat, _ := m["pattern"].(string)
-				return "", fmt.Sprintf("ProjX gate: %q is off-limits by gate rule %q.", p, pat), 2
+		for _, p := range paths {
+			if m, ok := cellReq("GET", base+"/api/gate/check?path="+url.QueryEscape(p)); ok {
+				if denied, _ := m["denied"].(bool); denied {
+					pat, _ := m["pattern"].(string)
+					return "", fmt.Sprintf("ProjX gate: %q is off-limits by gate rule %q.", p, pat), 2
+				}
 			}
-		}
 
+		}
 	case "PreCompact":
 		cellReq("POST", base+"/api/context/reset?session="+url.QueryEscape(sid))
 

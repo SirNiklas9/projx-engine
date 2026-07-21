@@ -97,13 +97,27 @@ func installMCPConfig(absRoot string) string {
 }
 
 func runInitCmd(absRoot string, args []string) {
+	global, codexOnly := false, false
+	for _, a := range args {
+		switch a {
+		case "--global":
+			global = true
+		case "--codex":
+			codexOnly = true
+		}
+	}
+	if global {
+		if codexOnly {
+			runCodexGlobalBootstrap()
+		} else {
+			runGlobalBootstrap()
+		}
+		return
+	}
 	var stacks []string
 	for _, a := range args {
-		if a == "--global" {
-			// The one-time, per-machine ProjX bootstrap (global hook + floor + skill),
-			// distinct from ProjX-enabling a project. It ignores --root by design.
-			runGlobalBootstrap()
-			return
+		if a == "--global" || a == "--codex" {
+			continue
 		}
 		if a == "--workspace" {
 			// Make --root a multi-repo WORKSPACE: a .projx-workspace marker + store whose
@@ -120,20 +134,27 @@ func runInitCmd(absRoot string, args []string) {
 	// 1. Install the connector's /projx:* slash commands into <root>/.claude. The
 	// lifecycle hooks are NOT installed per-project — the single global hook in
 	// ~/.claude/settings.json does all injection (a per-project hook would double-inject).
-	written, note, err := installConnector(absRoot)
-	if err != nil {
-		die("init: install connector: %v", err)
-	}
-	fmt.Printf("init: slash commands installed → %s (%d file(s) written)\n", filepath.Join(absRoot, ".claude"), written)
-	if note != "" {
-		fmt.Println("init: " + note)
-	}
+	if !codexOnly {
+		written, note, err := installConnector(absRoot)
+		if err != nil {
+			die("init: install connector: %v", err)
+		}
+		fmt.Printf("init: slash commands installed → %s (%d file(s) written)\n", filepath.Join(absRoot, ".claude"), written)
+		if note != "" {
+			fmt.Println("init: " + note)
+		}
 
-	// 1b. Register the ProjX MCP server in <root>/.mcp.json — the portable, agent-
-	// AGNOSTIC MCP config, so Claude Code / Cursor / Codex / Cline all get the store
-	// tools (store_query/route/gate_check/store_commit). Additive; merges, never clobbers.
-	if msg := installMCPConfig(absRoot); msg != "" {
-		fmt.Println("init: " + msg)
+		// 1b. Register the ProjX MCP server in <root>/.mcp.json — the portable, agent-
+		// AGNOSTIC MCP config, so Claude Code / Cursor / Codex / Cline all get the store
+		// tools (store_query/route/gate_check/store_commit). Additive; merges, never clobbers.
+		if msg := installMCPConfig(absRoot); msg != "" {
+			fmt.Println("init: " + msg)
+		}
+	}
+	if path, err := installCodexProjectConfig(absRoot); err != nil {
+		die("init: install Codex MCP config: %v", err)
+	} else {
+		fmt.Println("init: Codex MCP server registered -> " + path)
 	}
 
 	// 2. Seed the store. The floor + stack profiles seed only into a FRESH store (never
@@ -166,8 +187,10 @@ func runInitCmd(absRoot string, args []string) {
 	// 2b. If CodeGraph is already installed (NEVER auto-installed by ProjX), wire it up
 	// too: build its index, register its MCP server, declare the preference as a real,
 	// editable store convention. Silent no-op when it isn't present.
-	for _, line := range wireCodeGraph(absRoot) {
-		fmt.Println("init: " + line)
+	if !codexOnly {
+		for _, line := range wireCodeGraph(absRoot) {
+			fmt.Println("init: " + line)
+		}
 	}
 
 	// 2c. Bake a declared seed file if the project ships one (projx.seed.toml /
@@ -180,7 +203,7 @@ func runInitCmd(absRoot string, args []string) {
 	runMapSync(absRoot, nil)
 
 	// 4. PATH check + next steps.
-	reportInitNextSteps()
+	reportInitNextSteps(codexOnly)
 }
 
 // installConnector writes the embedded connector's slash-command files into <root>/.claude
@@ -228,7 +251,13 @@ func installConnector(absRoot string) (written int, note string, err error) {
 }
 
 // reportInitNextSteps checks the engine is reachable on PATH and prints what to do next.
-func reportInitNextSteps() {
+func reportInitNextSteps(codexOnly bool) {
+	if codexOnly {
+		fmt.Println("\ninit: Codex ready. Restart Codex to load the project MCP server.")
+		fmt.Println("  - ProjX context is injected by the global hook")
+		fmt.Println("  - MCP tools: store_query, route, gate_check, impact, store_commit")
+		return
+	}
 	onPath := false
 	if _, lookErr := exec.LookPath("projx-engine"); lookErr == nil {
 		onPath = true
