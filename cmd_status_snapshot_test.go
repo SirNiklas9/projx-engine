@@ -151,3 +151,20 @@ func TestConfiguredProjxMCPCommands(t *testing.T) {
 		t.Fatalf("configured commands = %q", got)
 	}
 }
+
+func TestEngineBuildInputsDirty(t *testing.T) {
+	if engineBuildInputsDirty("?? .codex/config.toml\n?? .mcp.json\n?? .codegraph/index.db\n?? CLAUDE.md\n") {
+		t.Fatal("generated harness/project files must not make the engine binary stale")
+	}
+	for _, status := range []string{
+		" M cmd_hook.go\n",
+		" M go.mod\n",
+		"?? status-dashboard/index.html\n",
+		" M codex-skill/SKILL.md\n",
+		"R  old.go -> internal/new.go\n",
+	} {
+		if !engineBuildInputsDirty(status) {
+			t.Fatalf("build input was not detected in %q", status)
+		}
+	}
+}

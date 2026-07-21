@@ -167,7 +167,27 @@ func engineSourceIdentity(root string) (revision string, dirty bool) {
 	if err != nil {
 		return strings.TrimSpace(string(head)), false
 	}
-	return strings.TrimSpace(string(head)), len(strings.TrimSpace(string(status))) > 0
+	return strings.TrimSpace(string(head)), engineBuildInputsDirty(string(status))
+}
+
+func engineBuildInputsDirty(porcelain string) bool {
+	for _, line := range strings.Split(porcelain, "\n") {
+		line = strings.TrimSpace(line)
+		if len(line) < 4 {
+			continue
+		}
+		path := strings.Trim(strings.TrimSpace(line[2:]), `"`)
+		if i := strings.LastIndex(path, " -> "); i >= 0 {
+			path = strings.Trim(strings.TrimSpace(path[i+4:]), `"`)
+		}
+		path = filepath.ToSlash(path)
+		if strings.HasSuffix(path, ".go") || path == "go.mod" || path == "go.sum" ||
+			strings.HasPrefix(path, "skill/") || strings.HasPrefix(path, "codex-skill/") ||
+			strings.HasPrefix(path, "claude-connector/.claude/") || strings.HasPrefix(path, "status-dashboard/") {
+			return true
+		}
+	}
+	return false
 }
 
 func binaryIdentityStale(binaryRevision, sourceRevision string, sourceDirty bool) bool {
