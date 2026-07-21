@@ -99,7 +99,11 @@ func scanReconciliation(st store.Store, now int64) []reconciliationIssue {
 				add(r, "supersession-chain-incomplete", r.Supersedes)
 			}
 		}
-		if r.LifecycleStatus() == store.StatusActive && strings.TrimSpace(r.Provenance) == "" {
+		// Empty Status is the legacy-compatible active default. Those pre-lifecycle rows
+		// commonly predate provenance too, so surfacing every one as urgent would flood
+		// normal sessions. Missing provenance is actionable only after a record has been
+		// explicitly enrolled in the lifecycle as active.
+		if r.Status == store.StatusActive && strings.TrimSpace(r.Provenance) == "" {
 			add(r, "authoritative-provenance-missing", "")
 		}
 		if r.LifecycleStatus() == store.StatusActive && strings.EqualFold(r.ClaimClass, "volatile") {

@@ -102,6 +102,31 @@ func TestScanReconciliationIgnoresGeneratedAndOperationalRecordNoise(t *testing.
 	}
 }
 
+func TestScanReconciliationDoesNotUrgentlyFlagLegacyBlankLifecycleProvenance(t *testing.T) {
+	m := store.NewMem()
+	legacy := []store.Record{
+		{ID: "convention/legacy", Kind: store.KConvention, Scope: store.ScopeProject, Key: "legacy convention"},
+		{ID: "adr/legacy", Kind: store.KADR, Scope: store.ScopeProject, Key: "legacy adr"},
+		{ID: "doc/legacy", Kind: store.KDoc, Scope: store.ScopeProject, Key: "legacy doc"},
+	}
+	for _, r := range legacy {
+		if err := m.Put(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if issues := scanReconciliation(m, time.Now().UnixMilli()); len(issues) != 0 {
+		t.Fatalf("legacy blank-status records should not enter the urgent queue: %+v", issues)
+	}
+	explicit := store.Record{ID: "doc/explicit", Kind: store.KDoc, Scope: store.ScopeProject, Key: "explicit", Status: store.StatusActive}
+	if err := m.Put(explicit); err != nil {
+		t.Fatal(err)
+	}
+	issues := scanReconciliation(m, time.Now().UnixMilli())
+	if len(issues) != 1 || issues[0].RecordID != explicit.ID || issues[0].Reason != "authoritative-provenance-missing" {
+		t.Fatalf("explicit active record without provenance should be actionable: %+v", issues)
+	}
+}
+
 func TestRefreshReconciliationReplacesExistingCheckpoint(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("PROJX_YOURS_DIR", filepath.Join(t.TempDir(), "yours"))
