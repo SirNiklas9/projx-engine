@@ -29,11 +29,12 @@ import (
 	store "github.com/SirNiklas9/projx-store"
 )
 
-// hookEvent is the subset of the Claude Code hook payload this handler reads.
-type hookEvent struct {
+// lifecycleEvent is the harness-neutral event consumed by ProjX's policy core.
+// Harness adapters normalize their payloads into this small common shape.
+type lifecycleEvent struct {
 	SessionID string `json:"session_id"`
 	Event     string `json:"hook_event_name"`
-	Cwd       string `json:"cwd"`       // project dir Claude Code ran the hook in
+	Cwd       string `json:"cwd"`       // project dir the harness ran the hook in
 	Prompt    string `json:"prompt"`    // UserPromptSubmit
 	ToolName  string `json:"tool_name"` // PreToolUse — which tool (Edit/Write/Read/…)
 	ToolInput struct {
@@ -44,6 +45,16 @@ type hookEvent struct {
 		Workdir  string `json:"workdir"`
 		Command  string `json:"command"` // PreToolUse (Bash) — the shell command line
 	} `json:"tool_input"`
+}
+
+// decodeLifecycleEvent is the adapter boundary between raw hook JSON and the
+// shared lifecycle policy. Field aliases are collapsed here so handleHook does
+// not need harness-specific branches.
+func decodeLifecycleEvent(input []byte) lifecycleEvent {
+	var ev lifecycleEvent
+	_ = json.Unmarshal(input, &ev) // partial/garbage input intentionally becomes a no-op event
+	ev.ToolInput.Command = firstHookValue(ev.ToolInput.Command, ev.ToolInput.Cmd)
+	return ev
 }
 
 func isMutatingHookTool(name string) bool {
@@ -66,7 +77,7 @@ func normalizedHookTool(name string) string {
 	}
 }
 
-func hookTargetPaths(ev hookEvent) []string {
+func hookTargetPaths(ev lifecycleEvent) []string {
 	var out []string
 	if p := strings.TrimSpace(ev.ToolInput.FilePath); p != "" {
 		out = append(out, p)
@@ -102,7 +113,7 @@ func firstHookValue(values ...string) string {
 	return ""
 }
 
-func resolveHookPath(ev hookEvent, p string) string {
+func resolveHookPath(ev lifecycleEvent, p string) string {
 	p = strings.TrimSpace(p)
 	if p == "" || filepath.IsAbs(p) || ev.ToolInput.Workdir == "" {
 		return p
@@ -110,7 +121,7 @@ func resolveHookPath(ev hookEvent, p string) string {
 	return filepath.Join(ev.ToolInput.Workdir, p)
 }
 
-func execCommandTargetPaths(ev hookEvent, cmd string) []string {
+func execCommandTargetPaths(ev lifecycleEvent, cmd string) []string {
 	supported := map[string]bool{"cat": true, "type": true, "get-content": true, "rg": true, "grep": true, "touch": true, "mkdir": true, "new-item": true, "rm": true, "remove-item": true, "cp": true, "copy-item": true, "mv": true, "move-item": true, "set-content": true, "add-content": true, "sed": true}
 	var out []string
 	fields := bashSplit(cmd)
@@ -169,8 +180,8 @@ func runHookCmd(absRoot string, _ []string) {
 		// agent edits/reads, not the static cwd). The crumb lives in the session cwd's
 		// project so the statusline command, deriving the same home, finds it.
 		home := targetStoreRoot(root, filepath.Join(root, "_"))
-		var meta hookEvent
-		if json.Unmarshal(data, &meta) == nil && meta.SessionID != "" {
+		meta := decodeLifecycleEvent(data)
+		if meta.SessionID != "" {
 			targets := hookTargetPaths(meta)
 			switch {
 			case meta.Event == "PreToolUse" && code == 2:
@@ -238,9 +249,7 @@ func hookRoot(absRoot string, data []byte) string {
 // handleHook is the print-free core: given the project root and the raw hook JSON it
 // returns (stdout, stderr, exitCode). Pure enough to unit-test by feeding JSON bytes.
 func handleHook(absRoot string, input []byte) (stdout, stderr string, code int) {
-	var ev hookEvent
-	_ = json.Unmarshal(input, &ev) // tolerate partial/garbage: empty event → no-op
-	ev.ToolInput.Command = firstHookValue(ev.ToolInput.Command, ev.ToolInput.Cmd)
+	ev := decodeLifecycleEvent(input)
 	sid := ev.SessionID
 	if sid == "" {
 		sid = "default"

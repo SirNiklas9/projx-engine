@@ -18,8 +18,11 @@ package main
 // failure. It reinvents neither dispatch nor verify; it drives them.
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -66,7 +69,18 @@ func loadWorkflowManifest(path string) (*WorkflowManifest, error) {
 		return nil, fmt.Errorf("read manifest: %w", err)
 	}
 	var m WorkflowManifest
-	if err := json.Unmarshal(data, &m); err != nil {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&m); err != nil {
+		return nil, fmt.Errorf("parse manifest: %w", err)
+	}
+	// A manifest is one declaration, not a JSON stream. Rejecting a second value
+	// prevents accidentally accepting a valid first object while ignoring trailing
+	// policy supplied by a generator or a hand edit.
+	var trailing any
+	if err := dec.Decode(&trailing); err == nil {
+		return nil, fmt.Errorf("parse manifest: unexpected trailing JSON value")
+	} else if !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("parse manifest: %w", err)
 	}
 	if len(m.Steps) == 0 {

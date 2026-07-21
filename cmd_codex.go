@@ -18,13 +18,7 @@ import (
 //go:embed codex-skill/SKILL.md
 var codexSkillMD string
 
-var codexHookSpecs = []hookSpec{
-	{"SessionStart", "", 30},
-	{"UserPromptSubmit", "", 15},
-	{"PreToolUse", "Bash|Read|Edit|Write|exec_command|shell|apply_patch", 10},
-	{"PreCompact", "", 15},
-	{"Stop", "", 10},
-}
+var codexHookSpecs = lifecycleHookSpecs("Bash|Read|Edit|Write|exec_command|shell|apply_patch")
 
 func codexHookCommand() string { return `"` + selfBinaryPath() + `" hook` }
 func codexDashboardCommand() string {

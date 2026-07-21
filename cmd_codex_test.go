@@ -64,6 +64,21 @@ func TestMergeCodexHooksAndProjectConfig(t *testing.T) {
 	}
 }
 
+func TestHarnessLifecycleSpecsStayInParity(t *testing.T) {
+	if len(projxHookSpecs) != len(codexHookSpecs) {
+		t.Fatalf("lifecycle event count differs: Claude=%d Codex=%d", len(projxHookSpecs), len(codexHookSpecs))
+	}
+	for i := range projxHookSpecs {
+		claude, codex := projxHookSpecs[i], codexHookSpecs[i]
+		if claude.event != codex.event || claude.timeout != codex.timeout {
+			t.Fatalf("lifecycle spec %d differs: Claude=%+v Codex=%+v", i, claude, codex)
+		}
+	}
+	if !strings.Contains(codexHookSpecs[2].matcher, "apply_patch") || strings.Contains(projxHookSpecs[2].matcher, "apply_patch") {
+		t.Fatalf("adapter-specific tool matchers lost: Claude=%q Codex=%q", projxHookSpecs[2].matcher, codexHookSpecs[2].matcher)
+	}
+}
+
 func TestCodexApplyPatchIsMutatingAndGated(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("PROJX_YOURS_DIR", filepath.Join(root, "yours"))

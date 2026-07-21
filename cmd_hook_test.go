@@ -78,6 +78,44 @@ func TestHandleHookLifecycle(t *testing.T) {
 	}
 }
 
+func TestDecodeLifecycleEventHarnessParity(t *testing.T) {
+	claude := decodeLifecycleEvent([]byte(`{
+		"session_id":"same", "hook_event_name":"PreToolUse", "cwd":"C:/work",
+		"tool_name":"Bash", "tool_input":{"command":"Get-Content docs/plan.md","workdir":"C:/work"}
+	}`))
+	codex := decodeLifecycleEvent([]byte(`{
+		"session_id":"same", "hook_event_name":"PreToolUse", "cwd":"C:/work",
+		"tool_name":"exec_command", "tool_input":{"cmd":"Get-Content docs/plan.md","workdir":"C:/work"}
+	}`))
+
+	if normalizedHookTool(claude.ToolName) != normalizedHookTool(codex.ToolName) {
+		t.Fatalf("tool normalization differs: Claude=%q Codex=%q", normalizedHookTool(claude.ToolName), normalizedHookTool(codex.ToolName))
+	}
+	if claude.ToolInput.Command != codex.ToolInput.Command {
+		t.Fatalf("command normalization differs: Claude=%q Codex=%q", claude.ToolInput.Command, codex.ToolInput.Command)
+	}
+	claudeTargets := hookTargetPaths(claude)
+	codexTargets := hookTargetPaths(codex)
+	if len(claudeTargets) != len(codexTargets) {
+		t.Fatalf("target normalization differs: Claude=%v Codex=%v", claudeTargets, codexTargets)
+	}
+	for i := range claudeTargets {
+		if claudeTargets[i] != codexTargets[i] {
+			t.Fatalf("target normalization differs: Claude=%v Codex=%v", claudeTargets, codexTargets)
+		}
+	}
+}
+
+func TestDecodeLifecycleEventMalformedPayloadIsNoOp(t *testing.T) {
+	ev := decodeLifecycleEvent([]byte(`{"hook_event_name":`))
+	if ev.Event != "" || ev.SessionID != "" || len(hookTargetPaths(ev)) != 0 {
+		t.Fatalf("malformed payload decoded to actionable event: %+v", ev)
+	}
+	if out, errOut, code := handleHook(t.TempDir(), []byte(`{"hook_event_name":`)); code != 0 || out != "" || errOut != "" {
+		t.Fatalf("malformed payload = (%q, %q, %d), want no-op", out, errOut, code)
+	}
+}
+
 // TestHookRootResolution proves the root is resolved from CLAUDE_PROJECT_DIR or the
 // payload cwd, so settings.json needs no shell variables.
 func TestHookRootResolution(t *testing.T) {
@@ -183,7 +221,7 @@ func TestCodexTargetsFloatAcrossProjects(t *testing.T) {
 	}
 
 	patchJSON := []byte(`{"session_id":"float","hook_event_name":"PreToolUse","tool_name":"functions.apply_patch","tool_input":{"patch":"*** Begin Patch\n*** Update File: ` + filepath.ToSlash(filepath.Join(repoA, "a.go")) + `\n*** Move to: ` + filepath.ToSlash(filepath.Join(repoB, "b.go")) + `\n*** End Patch"}}`)
-	var patchEvent hookEvent
+	var patchEvent lifecycleEvent
 	if err := json.Unmarshal(patchJSON, &patchEvent); err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +243,7 @@ func TestCodexTargetsFloatAcrossProjects(t *testing.T) {
 	}
 
 	execJSON := []byte(`{"session_id":"float","hook_event_name":"PreToolUse","tool_name":"exec_command","tool_input":{"cmd":"Get-Content src/app.go","workdir":` + jsonStr(repoA) + `}}`)
-	var execEvent hookEvent
+	var execEvent lifecycleEvent
 	if err := json.Unmarshal(execJSON, &execEvent); err != nil {
 		t.Fatal(err)
 	}

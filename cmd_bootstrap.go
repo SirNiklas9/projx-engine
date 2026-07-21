@@ -169,15 +169,21 @@ type hookSpec struct {
 	timeout int
 }
 
+// lifecycleHookSpecs defines the shared lifecycle contract. Adapters only
+// supply the tool names their harness uses for PreToolUse matching.
+func lifecycleHookSpecs(preToolMatcher string) []hookSpec {
+	return []hookSpec{
+		{"SessionStart", "", 30},
+		{"UserPromptSubmit", "", 15},
+		{"PreToolUse", preToolMatcher, 10},
+		{"PreCompact", "", 15},
+		{"Stop", "", 10},
+	}
+}
+
 // projxHookSpecs is the canonical ProjX hook registration — the five lifecycle events
 // and their timeouts. This is the single source the merge writes.
-var projxHookSpecs = []hookSpec{
-	{"SessionStart", "", 30},
-	{"UserPromptSubmit", "", 15},
-	{"PreToolUse", "Read|Edit|Write", 10},
-	{"PreCompact", "", 15},
-	{"Stop", "", 10},
-}
+var projxHookSpecs = lifecycleHookSpecs("Read|Edit|Write")
 
 // mergeGlobalHook parses ~/.claude/settings.json (creating it if absent), adds the ProjX
 // hook entry for each lifecycle event that doesn't already have one, and writes the file

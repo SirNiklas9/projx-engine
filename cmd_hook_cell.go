@@ -30,8 +30,7 @@ var cellHTTP = &http.Client{Timeout: 15 * time.Second}
 // handleHookViaCell maps a hook event to the cell's HTTP endpoints. Mirrors handleHook's
 // contract (stdout injected, exit 2 blocks).
 func handleHookViaCell(base string, input []byte) (stdout, stderr string, code int) {
-	var ev hookEvent
-	_ = json.Unmarshal(input, &ev)
+	ev := decodeLifecycleEvent(input)
 	sid := ev.SessionID
 	if sid == "" {
 		sid = "default"
