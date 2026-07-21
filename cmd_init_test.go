@@ -71,6 +71,7 @@ func TestInstallConnectorPreservesExistingSettings(t *testing.T) {
 // (a build/test recipe + an architecture overview doc).
 func TestInitSeedsAndMaps(t *testing.T) {
 	root := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
 	writeGoFile(t, root, "main.go", `package main
 
 // Greet says hello.

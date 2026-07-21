@@ -13,10 +13,11 @@ package main
 //   2. Seeds the GLOBAL-scope floor (working-protocol + secrets-by-codename conventions,
 //      off-limits gate rules) if absent — idempotent.
 //   3. Installs the `projx` skill to ~/.claude/skills/projx/SKILL.md (embedded here).
-//   4. Prints a summary of what it did vs what was already present.
+//   4. Activates this release beneath ~/.codex/projx/bin and prints a summary.
 //
 // Deterministic + idempotent: re-running never duplicates a hook, a floor record, or
-// re-writes an up-to-date skill. It does NOT (re)install the binary.
+// re-writes an up-to-date skill. Releases are copied to immutable managed paths;
+// an active executable is never overwritten.
 
 import (
 	"bytes"
@@ -41,6 +42,9 @@ var projxSkillMD string
 // Windows/Node spawn accept it too, whereas a backslash path is mangled by bash. Falls
 // back to the bare name (PATH resolution) only if the executable path can't be resolved.
 func selfBinaryPath() string {
+	if configuredBinary != "" {
+		return filepath.ToSlash(configuredBinary)
+	}
 	if self, err := os.Executable(); err == nil {
 		return filepath.ToSlash(self)
 	}
@@ -116,8 +120,18 @@ func runGlobalBootstrap() {
 	}
 	claudeDir := filepath.Join(home, ".claude")
 	settingsPath := filepath.Join(claudeDir, "settings.json")
+	managed, copied, err := provisionManagedBinary(home)
+	if err != nil {
+		die("bootstrap: provision managed engine: %v", err)
+	}
+	configuredBinary = managed
 
-	fmt.Println("projx bootstrap: installing the GLOBAL ProjX floor (idempotent — binary NOT touched)")
+	fmt.Println("projx bootstrap: preparing the GLOBAL ProjX layer (idempotent)")
+	if copied {
+		fmt.Printf("  engine: activated immutable binary → %s\n", managed)
+	} else {
+		fmt.Printf("  engine: already active → %s\n", managed)
+	}
 
 	// 1. Merge the lifecycle hook into ~/.claude/settings.json, preserving existing hooks.
 	added, skipped, err := mergeGlobalHook(settingsPath)

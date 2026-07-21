@@ -275,7 +275,7 @@ func handleHook(absRoot string, input []byte) (stdout, stderr string, code int) 
 		// Refresh the code map (silently), then inject the lean floor. A background
 		// dispatch that finished since last session surfaces here, once.
 		_, _, _, _ = syncMap(absRoot, nil)
-		ctx := buildSessionContext(absRoot, sid, "", false)
+		ctx := reconciliationPrompt(absRoot) + buildSessionContext(absRoot, sid, "", false)
 		markGovernedRecall(absRoot, sid, "")
 		if disp := surfaceFinishedDispatches(absRoot); disp != "" {
 			ctx = disp + "\n" + ctx
@@ -292,7 +292,7 @@ func handleHook(absRoot string, input []byte) (stdout, stderr string, code int) 
 		// Sessions store, working on Evolution pulls Evolution. openStore composes the
 		// global floor over whichever project, so law is injected either way.
 		root := activeContextRoot(absRoot, sid, ev.Prompt)
-		ctx := buildSessionContext(root, sid, ev.Prompt, false)
+		ctx := reconciliationPrompt(root) + buildSessionContext(root, sid, ev.Prompt, false)
 		markGovernedRecall(absRoot, sid, ev.Prompt)
 		ctx = pendingLearnNotice(absRoot, sid) + ctx
 		// NEXT-PROMPT SURFACE: any detached dispatch that finished but hasn't been
@@ -308,6 +308,9 @@ func handleHook(absRoot string, input []byte) (stdout, stderr string, code int) 
 
 	case "PreToolUse":
 		targets := hookTargetPaths(ev)
+		if err := enforceParallelWorkerLease(absRoot, ev, targets); err != nil {
+			return "", err.Error(), 2
+		}
 		path := ev.ToolInput.FilePath
 		if path == "" && len(targets) > 0 {
 			path = targets[0]
@@ -334,6 +337,11 @@ func handleHook(absRoot string, input []byte) (stdout, stderr string, code int) 
 			return "", fmt.Sprintf("ProjX gate: store unavailable (%v) — failing closed, action blocked.", err), 2
 		}
 		defer st.Close()
+		if cp, err := refreshReconciliation(storeRoot, false); err == nil {
+			if msg, blocked := reconciliationBlocksTargets(st, cp.Issues, targets); blocked {
+				return "", msg, 2
+			}
+		}
 
 		// Override authority is DELEGATED, never self-granted. The AI reaches the engine
 		// through this tool hook; a human runs it in their own terminal (which does not).

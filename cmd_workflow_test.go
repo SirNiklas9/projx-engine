@@ -55,3 +55,50 @@ func TestLoadWorkflowManifestAcceptsDeclaredShape(t *testing.T) {
 		t.Fatalf("unexpected manifest: %+v", m)
 	}
 }
+
+func TestWorkflowBatchesParallelDisjointAndDeps(t *testing.T) {
+	m := &WorkflowManifest{Parallel: true, Steps: []WorkflowStep{
+		{ID: "a", Task: "a", Writes: []string{"internal/a/**"}},
+		{ID: "b", Task: "b", Writes: []string{"internal/b/**"}},
+		{ID: "c", Task: "c", Deps: []string{"a"}, Writes: []string{"internal/c/**"}},
+	}}
+	b, err := workflowBatches(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(b) != 2 || len(b[0]) != 2 || b[0][0] != 0 || b[0][1] != 1 || b[1][0] != 2 {
+		t.Fatalf("unexpected batches: %#v", b)
+	}
+}
+
+func TestWorkflowBatchesSerializesOverlappingWrites(t *testing.T) {
+	m := &WorkflowManifest{Parallel: true, Steps: []WorkflowStep{
+		{ID: "a", Task: "a", Writes: []string{"internal/shared/**"}},
+		{ID: "b", Task: "b", Writes: []string{"internal/shared/file.go"}},
+	}}
+	b, err := workflowBatches(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(b) != 2 || b[0][0] != 0 || b[1][0] != 1 {
+		t.Fatalf("unexpected batches: %#v", b)
+	}
+}
+
+func TestParallelManifestFailsClosedWithoutWrites(t *testing.T) {
+	path := writeWorkflowManifestTestFile(t, `{"parallel":true,"steps":[{"id":"a","task":"a"}]}`)
+	_, err := loadWorkflowManifest(path)
+	if err == nil || !strings.Contains(err.Error(), "requires a non-empty writes") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestWorkflowChangedPathsAllowedRejectsUndeclared(t *testing.T) {
+	steps := []WorkflowStep{{Writes: []string{"internal/a/**"}}}
+	if err := workflowChangedPathsAllowed([]string{"internal/a/x.go"}, steps); err != nil {
+		t.Fatal(err)
+	}
+	if err := workflowChangedPathsAllowed([]string{"internal/b/x.go"}, steps); err == nil {
+		t.Fatal("expected undeclared mutation error")
+	}
+}

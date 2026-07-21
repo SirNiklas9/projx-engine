@@ -113,6 +113,8 @@ func main() {
 		runVerifyCmd(absRoot, rest)
 	case "verify-loop":
 		runVerifyLoopCmd(absRoot, rest)
+	case "reconcile":
+		runReconcileCmd(absRoot, rest)
 	case "context":
 		runContextCmd(absRoot, rest)
 	case "session-suggest":
@@ -169,8 +171,9 @@ func main() {
 // On non-Linux this always exits 1 (fail-closed).
 //
 // Extra path grants are conveyed via environment variables set by runAgentCmd:
-//   PROJX_ALLOW_READ  — os.PathListSeparator-separated list of extra RO paths
-//   PROJX_ALLOW_WRITE — os.PathListSeparator-separated list of extra RW paths
+//
+//	PROJX_ALLOW_READ  — os.PathListSeparator-separated list of extra RO paths
+//	PROJX_ALLOW_WRITE — os.PathListSeparator-separated list of extra RW paths
 func runConfinedLaunchCmd(args []string) {
 	if len(args) < 2 {
 		fmt.Fprintln(os.Stderr, "projx-engine: __confined-launch requires <root> <agent> [args...]")
@@ -269,6 +272,8 @@ Real commands:
   gate rm <id-or-pattern>                 remove a gate rule
   gate check <path>                       exit 0 if allowed, 2 if denied by a gate rule
   verify                                  check declared vs actual boundaries
+  reconcile [status] [--json]             scan lifecycle conflicts/freshness now; status reads the
+                                            automatically refreshed reconciliation checkpoint
   context                                 print the compiled store context (preamble) to stdout
                                             --task "<prompt>"   task-slice the reference knowledge
                                             --session <id>      session-aware delta (lean floor,
@@ -314,12 +319,14 @@ func die(format string, a ...any) {
 // permitted.  Denied commands print a message to stderr and exit 1.
 //
 // ALLOW (reads + agent-safe commits):
-//   store get, store list, store query, store log, store checkout
-//   store commit  — permitted, but --by is forced to "agent" inside storeCommit
+//
+//	store get, store list, store query, store log, store checkout
+//	store commit  — permitted, but --by is forced to "agent" inside storeCommit
 //
 // DENY (escalation / deletion / history-rewrite):
-//   gate (any subcommand), secret, agent, run
-//   store rm, store undo, store revert, store cherry-pick
+//
+//	gate (any subcommand), secret, agent, run
+//	store rm, store undo, store revert, store cherry-pick
 func enforceAgentContext(cmd string, rest []string) {
 	deny := func(label string) {
 		fmt.Fprintf(os.Stderr, "projx-engine: %q is not permitted in agent context\n", label)

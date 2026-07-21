@@ -46,7 +46,12 @@ fallbacks are `--compact`, `--watch`, and `--json`.
 
 ## Setup
 
-Global setup is idempotent:
+The skill owns setup and updates. It stages a prebuilt release and runs global
+bootstrap; the engine then copies itself to an immutable, content-addressed path
+under `~/.codex/projx/bin/` and points Codex and Claude adapters at that exact
+path. Do not ask the user to install it, edit PATH, or replace a running binary.
+
+Global bootstrap is idempotent:
 
 ```text
 projx-engine init --global
@@ -64,6 +69,7 @@ Create a multi-repository workspace from its parent directory:
 projx-engine --root <workspace> init --workspace
 ```
 
-Global setup installs Codex lifecycle hooks and this skill. Project setup
-registers the ProjX MCP server in `.codex/config.toml`, then seeds and indexes the
-project. Restart Codex after changing global hooks or MCP configuration.
+Global bootstrap activates the managed engine, installs lifecycle hooks, and
+refreshes this skill. Project setup registers that exact engine with MCP, then
+seeds and indexes the project. Restart Codex after hook or MCP configuration
+changes; active sessions may finish on their previous immutable engine.

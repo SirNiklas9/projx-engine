@@ -34,6 +34,7 @@ type dispatchManifest struct {
 	Verify   string             `json:"verify,omitempty"` // "" | passed | failed | skipped
 	Reported bool               `json:"reported"`         // surfaced to the trunk yet?
 	PID      int                `json:"pid,omitempty"`
+	Parallel bool               `json:"parallel,omitempty"` // workflow: deterministic write-disjoint waves enabled
 }
 
 // dispatchStepStat is one step's routing + live status inside a manifest.
@@ -53,9 +54,10 @@ type dispatchStepStat struct {
 	State       string `json:"state"`             // pending | running | done | failed
 	Mutated     string `json:"mutated,omitempty"` // yes | no | unknown — did the step CHANGE the working tree?
 
-	ID   string   `json:"id,omitempty"`   // workflow: the step's handle (dep target)
-	Deps []string `json:"deps,omitempty"` // workflow: ids that must complete first
-	Gate string   `json:"gate,omitempty"` // workflow: resolved gate — conformance|behavioral|both ("" = none)
+	ID     string   `json:"id,omitempty"`     // workflow: the step's handle (dep target)
+	Deps   []string `json:"deps,omitempty"`   // workflow: ids that must complete first
+	Gate   string   `json:"gate,omitempty"`   // workflow: resolved gate — conformance|behavioral|both ("" = none)
+	Writes []string `json:"writes,omitempty"` // workflow: declared repo-relative mutation set
 }
 
 // workerScope is the per-worker ProjX scope the supervisor computes for ONE step:

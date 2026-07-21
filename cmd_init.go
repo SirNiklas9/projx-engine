@@ -19,12 +19,12 @@ package main
 // that already exist, so nothing is clobbered or duplicated.
 
 import (
+	"bytes"
 	"embed"
 	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -56,8 +56,12 @@ func mergeMCPServer(absRoot, name string, def map[string]any) (msg string, added
 	if servers == nil {
 		servers = map[string]any{}
 	}
-	if _, exists := servers[name]; exists {
-		return fmt.Sprintf("MCP server %q already registered in .mcp.json", name), false
+	if existing, exists := servers[name]; exists {
+		have, _ := json.Marshal(existing)
+		want, _ := json.Marshal(def)
+		if bytes.Equal(have, want) {
+			return fmt.Sprintf("MCP server %q already registered in .mcp.json", name), false
+		}
 	}
 	servers[name] = def
 	cfg["mcpServers"] = servers
@@ -76,9 +80,6 @@ func mergeMCPServer(absRoot, name string, def map[string]any) (msg string, added
 // spawned WITHOUT a shell, so unlike the hook there is no ${} expansion — the path is baked
 // at init. Shares selfBinaryPath with the hook so hook and MCP never point at different bins.
 func mcpBinaryPath() string {
-	if b := strings.TrimSpace(os.Getenv("PROJX_ENGINE_BIN")); b != "" {
-		return filepath.ToSlash(b)
-	}
 	return selfBinaryPath()
 }
 
@@ -129,6 +130,13 @@ func runInitCmd(absRoot string, args []string) {
 			continue // retained for compatibility; the connector no longer writes a hook file
 		}
 		stacks = append(stacks, strings.ToLower(strings.TrimSpace(a)))
+	}
+	managed, copied, err := activateManagedBinary()
+	if err != nil {
+		die("init: activate managed engine: %v", err)
+	}
+	if copied {
+		fmt.Printf("init: engine activated -> %s\n", managed)
 	}
 
 	// 1. Install the connector's /projx:* slash commands into <root>/.claude. The
@@ -250,7 +258,8 @@ func installConnector(absRoot string) (written int, note string, err error) {
 	return written, note, walkErr
 }
 
-// reportInitNextSteps checks the engine is reachable on PATH and prints what to do next.
+// reportInitNextSteps reports harness activation. Binary placement and adapter
+// maintenance belong to the ProjX skill, never to the user's PATH.
 func reportInitNextSteps(codexOnly bool) {
 	if codexOnly {
 		fmt.Println("\ninit: Codex ready. Restart Codex to load the project MCP server.")
@@ -258,19 +267,9 @@ func reportInitNextSteps(codexOnly bool) {
 		fmt.Println("  - MCP tools: store_query, route, gate_check, impact, store_commit")
 		return
 	}
-	onPath := false
-	if _, lookErr := exec.LookPath("projx-engine"); lookErr == nil {
-		onPath = true
-	}
 	fmt.Println("\ninit: ready. Open Claude Code in this project — the GLOBAL ProjX hook loads the store automatically.")
 	fmt.Println("  • SessionStart injects the lean floor; each message injects a task-sliced delta")
 	fmt.Println("  • /projx:remember <fact>   save knowledge   • /projx:store   show the store")
 	fmt.Println("  • /projx:route <task>      see the tier     • /projx:gate    list off-limits paths")
-	if !onPath {
-		self, _ := os.Executable()
-		fmt.Printf("\ninit: NOTE — the ProjX hook runs `projx-engine hook` resolved from your PATH, but\n")
-		fmt.Printf("      projx-engine isn't on PATH yet, so the hook will fail until you fix that.\n")
-		fmt.Printf("      Add its directory to PATH (on Windows: the install dir to your User PATH),\n")
-		fmt.Printf("      or set PROJX_ENGINE_BIN=%s\n", self)
-	}
+	fmt.Println("  • Global adapters and updates are maintained automatically by the ProjX skill")
 }

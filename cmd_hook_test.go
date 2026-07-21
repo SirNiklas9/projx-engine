@@ -287,3 +287,54 @@ func jsonStr(s string) string {
 	b, _ := json.Marshal(s)
 	return string(b)
 }
+
+func TestParallelWorkerWriteLeaseEnforcedAcrossTools(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("PROJX_YOURS_DIR", t.TempDir())
+	if err := os.MkdirAll(filepath.Join(root, ".projx"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(parallelWorkerEnv, "1")
+	t.Setenv("PROJX_WORKER_WRITES", "internal/a/**")
+	inside := filepath.Join(root, "internal", "a", "ok.go")
+	outside := filepath.Join(root, "internal", "b", "no.go")
+	for name, input := range map[string][]byte{
+		"edit allowed":  []byte(`{"hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":` + jsonStr(inside) + `}}`),
+		"patch blocked": []byte(`{"hook_event_name":"PreToolUse","tool_name":"apply_patch","tool_input":{"input":"*** Begin Patch\n*** Update File: ` + filepath.ToSlash(outside) + `\n*** End Patch"}}`),
+		"shell blocked": []byte(`{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"Set-Content ` + filepath.ToSlash(outside) + ` x"}}`),
+	} {
+		_, stderr, code := handleHook(root, input)
+		if name == "edit allowed" && code != 0 {
+			t.Fatalf("%s: code=%d stderr=%q", name, code, stderr)
+		}
+		if name != "edit allowed" && (code != 2 || !strings.Contains(stderr, "outside its declared write lease")) {
+			t.Fatalf("%s: code=%d stderr=%q", name, code, stderr)
+		}
+	}
+}
+
+func TestParallelWorkerWriteLeaseFailsClosed(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("PROJX_YOURS_DIR", t.TempDir())
+	if err := os.MkdirAll(filepath.Join(root, ".projx"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(parallelWorkerEnv, "1")
+	t.Setenv("PROJX_WORKER_WRITES", "")
+	input := []byte(`{"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"x.go"}}`)
+	_, stderr, code := handleHook(root, input)
+	if code != 2 || !strings.Contains(stderr, "no write lease") {
+		t.Fatalf("code=%d stderr=%q", code, stderr)
+	}
+}
+
+func TestParallelWorkerInvalidWriteLeaseFailsClosed(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv(parallelWorkerEnv, "1")
+	t.Setenv("PROJX_WORKER_WRITES", "../outside/**")
+	ev := decodeLifecycleEvent([]byte(`{"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"x.go"}}`))
+	err := enforceParallelWorkerLease(root, ev, hookTargetPaths(ev))
+	if err == nil || !strings.Contains(err.Error(), "invalid write lease") {
+		t.Fatalf("got %v", err)
+	}
+}

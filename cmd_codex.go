@@ -217,7 +217,17 @@ func runCodexGlobalBootstrap() {
 	if err != nil {
 		die("bootstrap: cannot resolve home dir: %v", err)
 	}
-	fmt.Println("projx bootstrap: installing Codex adapter (idempotent - binary NOT touched)")
+	managed, copied, err := provisionManagedBinary(home)
+	if err != nil {
+		die("bootstrap: provision managed engine: %v", err)
+	}
+	configuredBinary = managed
+	fmt.Println("projx bootstrap: preparing Codex adapter (idempotent)")
+	if copied {
+		fmt.Printf("  engine: activated immutable binary -> %s\n", managed)
+	} else {
+		fmt.Printf("  engine: already active -> %s\n", managed)
+	}
 	if err := bootstrapCodex(home); err != nil {
 		die("bootstrap: install Codex adapter: %v", err)
 	}

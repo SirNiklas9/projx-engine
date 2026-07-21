@@ -13,22 +13,13 @@ one-line anchor jump instead of a 25-file grep.
 
 ---
 
-## Quick start — is it drag-and-drop?
+## Quick start — AI-managed, not manually installed
 
-Almost. One-time install, then one command per project. You also need the `claude` CLI
-(Claude Code) — you already have it.
-
-**Install (one line, prebuilt — no build from source):**
-```sh
-# Linux / macOS
-curl -fsSL https://raw.githubusercontent.com/SirNiklas9/projx-engine/main/install.sh | sh
-
-# Windows (PowerShell)
-irm https://raw.githubusercontent.com/SirNiklas9/projx-engine/main/install.ps1 | iex
-```
-Each installer downloads the latest release binary, puts it on your `PATH`, and runs the
-global bootstrap (lifecycle hook + global floor + the projx skill). Idempotent and
-self-healing — re-run any time to upgrade and repair.
+Add the ProjX skill/plugin and ask the AI to enable ProjX. The skill downloads the
+matching prebuilt release to a temporary location and invokes `init --global`. The
+engine places itself at an immutable, content-addressed location beneath
+`~/.codex/projx/bin/` and configures Codex and Claude to use that exact binary. It
+does not require PATH edits, an installer script, or replacement of a running process.
 
 **Or install as a Claude Code plugin:**
 ```
@@ -36,7 +27,8 @@ self-healing — re-run any time to upgrade and repair.
 /plugin install projx@projx
 ```
 The plugin bundles the projx skill + `/projx:*` commands; on first use the skill fetches
-the binary and runs `init --global` for you.
+the binary and runs `init --global` for you. Repeating the process upgrades and repairs
+ProjX. Each release has a separate path, so existing sessions finish uninterrupted.
 
 **Per project (the "drag and drop"):**
 ```sh
@@ -56,12 +48,11 @@ From then on the SessionStart refresh keeps them indexed, and **focus auto-track
 repo you're editing** (edit `Evolution/…` → its context leads; jump to `Frontend/…` → it
 shifts). Override with `@focus <repo>` / `@unfocus`.
 
-To turn it on for a friend's existing project: they run the one-line installer above, then
-`projx-engine init` in the repo. No config files to write by hand.
+To turn it on for an existing project, ask the AI to enable ProjX there. No config files,
+PATH changes, or binary lifecycle work are required from the user.
 
-> **Building from source** (contributors): `make install` git-stamps the version and installs
-> to `~/.local/bin` (Windows: `.\build.ps1`). The one-line installers above are the supported
-> path for everyone else.
+> **Building from source** is only for contributors. End-user setup always uses the
+> skill-managed prebuilt release.
 
 ---
 

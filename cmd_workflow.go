@@ -26,6 +26,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/SirNiklas9/projx-engine/internal/routing"
@@ -36,17 +37,19 @@ import (
 // authored order is guaranteed to be a valid topological order — no scheduler, no
 // reasoning, fully deterministic.
 type WorkflowManifest struct {
-	Name  string         `json:"name,omitempty"`
-	Steps []WorkflowStep `json:"steps"`
+	Name     string         `json:"name,omitempty"`
+	Parallel bool           `json:"parallel,omitempty"`
+	Steps    []WorkflowStep `json:"steps"`
 }
 
 // WorkflowStep is one node: a task plus how ProjX should route + gate it.
 type WorkflowStep struct {
-	ID     string   `json:"id"`             // unique handle, referenced by later deps
-	Task   string   `json:"task"`           // what the worker is asked to do
-	Tier   string   `json:"tier,omitempty"` // capability-class override; else the store rules route it
-	Role   string   `json:"role,omitempty"` // per-worker scope label; else derived from the routing
-	Deps   []string `json:"deps,omitempty"` // ids that MUST have completed before this step runs
+	ID     string   `json:"id"`               // unique handle, referenced by later deps
+	Task   string   `json:"task"`             // what the worker is asked to do
+	Tier   string   `json:"tier,omitempty"`   // capability-class override; else the store rules route it
+	Role   string   `json:"role,omitempty"`   // per-worker scope label; else derived from the routing
+	Deps   []string `json:"deps,omitempty"`   // ids that MUST have completed before this step runs
+	Writes []string `json:"writes,omitempty"` // repo-relative files/globs this step may mutate
 	Verify bool     `json:"verify,omitempty"`
 
 	// Gate SELECTS which post-step gate runs (SHAPE decision #2, formerly deferred):
@@ -97,6 +100,14 @@ func loadWorkflowManifest(path string) (*WorkflowManifest, error) {
 		if strings.TrimSpace(s.Task) == "" {
 			return nil, fmt.Errorf("step %q: missing task", s.ID)
 		}
+		if m.Parallel && len(s.Writes) == 0 {
+			return nil, fmt.Errorf("step %q: parallel workflow requires a non-empty writes declaration", s.ID)
+		}
+		for _, p := range s.Writes {
+			if err := validateWorkflowWrite(p); err != nil {
+				return nil, fmt.Errorf("step %q: invalid writes entry %q: %w", s.ID, p, err)
+			}
+		}
 		for _, d := range s.Deps {
 			if !seen[d] {
 				return nil, fmt.Errorf("step %q: dep %q is not an earlier step", s.ID, d)
@@ -109,6 +120,11 @@ func loadWorkflowManifest(path string) (*WorkflowManifest, error) {
 			return nil, fmt.Errorf("step %q: invalid gate %q (want conformance|behavioral|both|none)", s.ID, s.Gate)
 		}
 		seen[s.ID] = true
+	}
+	if m.Parallel {
+		if _, err := workflowBatches(&m); err != nil {
+			return nil, err
+		}
 	}
 	return &m, nil
 }
@@ -192,58 +208,51 @@ func runWorkflowCmd(absRoot string, args []string) {
 	}
 
 	self, _ := os.Executable()
-	done := map[string]bool{}
-	for i := range m.Steps {
-		s := m.Steps[i]
-		d := decisions[i]
-
-		// Deps are pre-validated to be earlier steps; this guard makes a gate-aborted
-		// run refuse to start a step whose dependency never completed.
-		for _, dep := range s.Deps {
-			if !done[dep] {
-				die("workflow: step %q blocked — dep %q did not complete", s.ID, dep)
+	batches, err := workflowBatches(m)
+	if err != nil {
+		die("workflow: %v", err)
+	}
+	for _, batch := range batches {
+		errs := make([]error, len(batch))
+		var wg sync.WaitGroup
+		for bi, i := range batch {
+			s, d := m.Steps[i], decisions[i]
+			fmt.Printf("\n── workflow %s: step %d/%d [%s] %s\n", workflowName(m), i+1, len(m.Steps), workflowTierLabel(d), s.ID)
+			wg.Add(1)
+			go func(pos int, s WorkflowStep, d routing.Decision) {
+				defer wg.Done()
+				errs[pos] = runWorkflowChild(self, absRoot, s, d)
+			}(bi, s, d)
+		}
+		wg.Wait()
+		for bi, i := range batch {
+			s := m.Steps[i]
+			if errs[bi] != nil {
+				die("workflow: step %q failed: %v", s.ID, errs[bi])
+			}
+			if gate := resolveStepGate(s); gate != "" {
+				fmt.Printf("── workflow %s: step %q %s gate ──\n", workflowName(m), s.ID, gate)
+				if runWorkflowGate(absRoot, gate) {
+					die("workflow: step %q %s GATE FAILED", s.ID, gate)
+				}
+				fmt.Printf("── workflow %s: step %q gate PASSED\n", workflowName(m), s.ID)
 			}
 		}
-
-		role := strings.TrimSpace(s.Role)
-		fmt.Printf("\n── workflow %s: step %d/%d [%s] %s\n",
-			workflowName(m), i+1, len(m.Steps), workflowTierLabel(d), s.ID)
-
-		var stepErr error
-		if d.Kind == "deterministic" {
-			stepErr = runDispatchChild(self, absRoot, deterministicStepArgs(d.Op), "", nil)
-		} else {
-			if role == "" {
-				role = workerRoleForStep(dispatchStepStat{Tier: d.Class, Kind: d.Kind, Op: d.Op})
-			}
-			stepErr = runDispatchChild(self, absRoot,
-				[]string{"agent", "run", "--task", s.Task, "--", s.Task},
-				d.ProviderCmd,
-				[]string{"PROJX_WORKER_ROLE=" + role})
-		}
-		if stepErr != nil {
-			die("workflow: step %q failed: %v", s.ID, stepErr)
-		}
-
-		// PER-STEP GATE — SELECTABLE (SHAPE decision #2). resolveStepGate maps the
-		// step's gate field (with the legacy Verify:true ⇒ conformance fallback) to the
-		// concrete gate kind, and runWorkflowGate runs it. A failed gate STOPS the
-		// workflow here (the whole point of a per-step gate vs one final one).
-		if gate := resolveStepGate(s); gate != "" {
-			fmt.Printf("── workflow %s: step %q %s gate ──\n", workflowName(m), s.ID, gate)
-			if runWorkflowGate(absRoot, gate) {
-				fmt.Printf("workflow: step %q %s GATE FAILED.\n", s.ID, gate)
-				fmt.Printf("workflow: stopped at step %d/%d (%q). Remaining steps NOT run.\n",
-					i+1, len(m.Steps), s.ID)
-				os.Exit(1)
-			}
-			fmt.Printf("── workflow %s: step %q gate PASSED\n", workflowName(m), s.ID)
-		}
-
-		done[s.ID] = true
 	}
 
 	fmt.Printf("\nworkflow %s: DONE — %d/%d steps completed\n", workflowName(m), len(m.Steps), len(m.Steps))
+}
+
+func runWorkflowChild(self, absRoot string, s WorkflowStep, d routing.Decision) error {
+	if d.Kind == "deterministic" {
+		return runDispatchChild(self, absRoot, deterministicStepArgs(d.Op), "", nil)
+	}
+	role := strings.TrimSpace(s.Role)
+	if role == "" {
+		role = workerRoleForStep(dispatchStepStat{Tier: d.Class, Kind: d.Kind, Op: d.Op})
+	}
+	env := []string{"PROJX_WORKER_ROLE=" + role, parallelWorkerEnv + "=1", "PROJX_WORKER_WRITES=" + strings.Join(s.Writes, string(os.PathListSeparator))}
+	return runDispatchChild(self, absRoot, []string{"agent", "run", "--task", s.Task, "--", s.Task}, d.ProviderCmd, env)
 }
 
 func printWorkflowPlan(m *WorkflowManifest, decisions []routing.Decision) {
@@ -351,11 +360,12 @@ func gateConformance(absRoot string) (failed bool) {
 func startDetachedWorkflow(absRoot string, m *WorkflowManifest, decisions []routing.Decision) {
 	id := newDispatchID()
 	dm := &dispatchManifest{
-		ID:      id,
-		Message: "workflow: " + workflowName(m),
-		State:   "running",
-		Started: time.Now(),
-		Steps:   make([]dispatchStepStat, 0, len(m.Steps)),
+		ID:       id,
+		Message:  "workflow: " + workflowName(m),
+		State:    "running",
+		Started:  time.Now(),
+		Steps:    make([]dispatchStepStat, 0, len(m.Steps)),
+		Parallel: m.Parallel,
 	}
 	for i, s := range m.Steps {
 		d := decisions[i]
@@ -369,6 +379,7 @@ func startDetachedWorkflow(absRoot string, m *WorkflowManifest, decisions []rout
 			ID:          s.ID,
 			Deps:        s.Deps,
 			Gate:        resolveStepGate(s),
+			Writes:      s.Writes,
 		}
 		role := strings.TrimSpace(s.Role)
 		if stat.Kind != "deterministic" && role == "" {
@@ -435,6 +446,10 @@ func runWorkflowSupervise(absRoot string, args []string) {
 	_ = writeDispatchManifest(absRoot, m)
 
 	self, _ := os.Executable()
+	if detachedWorkflowParallel(m) {
+		runParallelWorkflowSupervise(absRoot, id, self, m)
+		return
+	}
 	done := map[string]bool{}
 	failed := false
 	gateRan := false
@@ -520,6 +535,99 @@ func runWorkflowSupervise(absRoot string, args []string) {
 	}
 	_ = writeDispatchManifest(absRoot, m)
 	fmt.Printf("\nworkflow %s: %s (gate: %s)\n", id, m.State, orDashDispatch(m.Verify))
+}
+
+func detachedWorkflowParallel(m *dispatchManifest) bool {
+	if !m.Parallel {
+		return false
+	}
+	for _, st := range m.Steps {
+		if len(st.Writes) == 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func runParallelWorkflowSupervise(absRoot, id, self string, m *dispatchManifest) {
+	plan := &WorkflowManifest{Parallel: true, Steps: make([]WorkflowStep, len(m.Steps))}
+	for i, st := range m.Steps {
+		plan.Steps[i] = WorkflowStep{ID: st.ID, Task: st.Task, Deps: st.Deps, Writes: st.Writes}
+	}
+	batches, err := workflowBatches(plan)
+	failed, gateRan := err != nil, false
+	if err != nil {
+		fmt.Printf("workflow %s: schedule failed: %v\n", id, err)
+	}
+	for _, batch := range batches {
+		if failed {
+			break
+		}
+		errs := make([]error, len(batch))
+		var wg sync.WaitGroup
+		for bi, i := range batch {
+			m.Steps[i].State = "running"
+			fmt.Printf("\n── workflow %s: step %d/%d [%s] %s\n", id, i+1, len(m.Steps), m.Steps[i].Tier, m.Steps[i].ID)
+			wg.Add(1)
+			go func(pos int, st dispatchStepStat) {
+				defer wg.Done()
+				errs[pos] = runDetachedParallelChild(self, absRoot, st)
+			}(bi, m.Steps[i])
+		}
+		_ = writeDispatchManifest(absRoot, m)
+		wg.Wait()
+		for bi, i := range batch {
+			st := &m.Steps[i]
+			if errs[bi] != nil {
+				st.State = "failed"
+				failed = true
+				fmt.Printf("workflow %s: step %q failed: %v\n", id, st.ID, errs[bi])
+				continue
+			}
+			if st.Gate != "" {
+				gateRan = true
+				fmt.Printf("── workflow %s: step %q %s gate ──\n", id, st.ID, st.Gate)
+				if runWorkflowGate(absRoot, st.Gate) {
+					st.State = "failed"
+					failed = true
+					m.Verify = "failed"
+					continue
+				}
+				fmt.Printf("── workflow %s: step %q gate PASSED\n", id, st.ID)
+			}
+			if st.State != "failed" {
+				st.State = "done"
+			}
+		}
+		_ = writeDispatchManifest(absRoot, m)
+	}
+	if !failed {
+		if gateRan {
+			m.Verify = "passed"
+		} else {
+			m.Verify = "skipped"
+		}
+	}
+	m.Finished = time.Now()
+	if failed {
+		m.State = "failed"
+	} else {
+		m.State = "done"
+	}
+	_ = writeDispatchManifest(absRoot, m)
+	fmt.Printf("\nworkflow %s: %s (gate: %s)\n", id, m.State, orDashDispatch(m.Verify))
+}
+
+func runDetachedParallelChild(self, absRoot string, st dispatchStepStat) error {
+	if st.Kind == "deterministic" {
+		return runDispatchChild(self, absRoot, deterministicStepArgs(st.Op), "", nil)
+	}
+	role := st.Role
+	if role == "" {
+		role = workerRoleForStep(st)
+	}
+	env := []string{"PROJX_WORKER_ROLE=" + role, parallelWorkerEnv + "=1", "PROJX_WORKER_WRITES=" + strings.Join(st.Writes, string(os.PathListSeparator))}
+	return runDispatchChild(self, absRoot, []string{"agent", "run", "--task", st.Task, "--", st.Task}, st.ProviderCmd, env)
 }
 
 // DELIBERATELY DEFERRED — held for Nick to direct the shape (see adr/workflow-dictation-
