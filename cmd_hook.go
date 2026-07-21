@@ -276,6 +276,7 @@ func handleHook(absRoot string, input []byte) (stdout, stderr string, code int) 
 		// dispatch that finished since last session surfaces here, once.
 		_, _, _, _ = syncMap(absRoot, nil)
 		ctx := buildSessionContext(absRoot, sid, "", false)
+		markGovernedRecall(absRoot, sid, "")
 		if disp := surfaceFinishedDispatches(absRoot); disp != "" {
 			ctx = disp + "\n" + ctx
 		}
@@ -292,6 +293,8 @@ func handleHook(absRoot string, input []byte) (stdout, stderr string, code int) 
 		// global floor over whichever project, so law is injected either way.
 		root := activeContextRoot(absRoot, sid, ev.Prompt)
 		ctx := buildSessionContext(root, sid, ev.Prompt, false)
+		markGovernedRecall(absRoot, sid, ev.Prompt)
+		ctx = pendingLearnNotice(absRoot, sid) + ctx
 		// NEXT-PROMPT SURFACE: any detached dispatch that finished but hasn't been
 		// reported gets a concise summary prepended here (and flipped Reported=true), so
 		// the background result reaches Nick on his next turn without polling.
@@ -408,6 +411,11 @@ func handleHook(absRoot string, input []byte) (stdout, stderr string, code int) 
 				cps.Save(sid, cp)
 			}
 		}
+		if isGovernedMutation(ev) {
+			if !markGovernedMutation(absRoot, sid, mutationRoots(absRoot, targets), targets) {
+				return "", "ProjX governed turn: checkpoint state is unavailable; failing closed before mutation.", 2
+			}
+		}
 		return "", "", 0
 
 	case "PreCompact":
@@ -415,6 +423,9 @@ func handleHook(absRoot string, input []byte) (stdout, stderr string, code int) 
 		return "", "", 0
 
 	case "Stop":
+		if msg, block := closeGovernedTurn(absRoot, sid); block {
+			return "", msg, 2
+		}
 		if msg, block := sessionSuggest(absRoot, sid); block {
 			return "", msg, 2
 		}

@@ -167,8 +167,9 @@ one-shot agent binary you already run). Nothing in ProjX's logic is vendor-speci
 - **UserPromptSubmit** → inject the **delta**: the law re-asserted + only the new/changed
   records relevant to *this* message (ranked, capped, balanced across repos, focused on
   your active repo). Already-seen records aren't re-sent.
-- **PreToolUse (Read/Edit/Write)** → **gate**: block a tool call whose target path is
-  off-limits (`secret/**`, `.env*`, keys) — enforced, not advised.
+- **PreToolUse (Bash/Read/Edit/Write/MultiEdit/NotebookEdit)** → **gate**: block a
+  tool call whose target path or shell command reaches off-limits data
+  (`secret/**`, `.env*`, keys) — enforced, not advised.
 - **PreCompact** → mark the floor lost so the next turn refills after compaction.
 - **Stop** → **suggest-only**: if you said `@remember` and nothing was committed, nudge
   once (never nags).

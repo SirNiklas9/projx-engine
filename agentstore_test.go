@@ -21,19 +21,19 @@ package main
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
 	"time"
-	"os/exec"
 
 	store "github.com/SirNiklas9/projx-store"
 )
 
 // fakeAgentStoreSource is a fake agent that:
 //  1. Commits a doc record using projx-engine store commit.
-//  2. Queries it back using projx-engine store query --kind doc.
+//  2. Queries the staged candidate back explicitly.
 //  3. Prints the query result to stdout so the parent test can assert on it.
 //
 // It locates projx-engine via PATH (which, inside the jail, resolves to the
@@ -80,7 +80,7 @@ func main() {
 
 	// Query it back.
 	queryOut, queryCode := run("projx-engine", "--root", root,
-		"store", "query", "--kind", "doc",
+		"store", "query", "--kind", "doc", "--status", "candidate",
 	)
 	if queryCode != 0 {
 		fmt.Fprintf(os.Stderr, "query failed (code %d): %s\n", queryCode, queryOut)

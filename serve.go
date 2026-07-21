@@ -327,17 +327,24 @@ func (s *controlServer) handleGrantsRevoke(w http.ResponseWriter, r *http.Reques
 // (kind/scope as names, not ints). The engine serve is the store's backend, so it
 // emits exactly this shape and the cell pure-proxies it.
 type storeRecordView struct {
-	ID    string `json:"id"`
-	Kind  string `json:"kind"`
-	Scope string `json:"scope"`
-	Key   string `json:"key"`
-	Body  string `json:"body"`
+	ID          string `json:"id"`
+	Kind        string `json:"kind"`
+	Scope       string `json:"scope"`
+	Key         string `json:"key"`
+	Body        string `json:"body"`
+	Status      string `json:"status"`
+	Provenance  string `json:"provenance,omitempty"`
+	VerifiedAt  int64  `json:"verified_at,omitempty"`
+	ReviewAfter int64  `json:"review_after,omitempty"`
+	Supersedes  string `json:"supersedes,omitempty"`
+	ReplacedBy  string `json:"replaced_by,omitempty"`
 }
 
 // handleStoreList — GET /api/store[?kind=&scope=] -> {"records":[...]}.
 func (s *controlServer) handleStoreList(w http.ResponseWriter, r *http.Request) {
 	st := s.storeFor(s.reqRoot(r))
 	f := store.Filter{}
+	f.IncludeNonAuthoritative = true
 	if k := r.URL.Query().Get("kind"); k != "" {
 		if kind, err := parseKindForList(k); err == nil {
 			f.Kind = &kind
@@ -350,7 +357,7 @@ func (s *controlServer) handleStoreList(w http.ResponseWriter, r *http.Request) 
 	}
 	views := []storeRecordView{}
 	for _, rec := range st.List(f) {
-		views = append(views, storeRecordView{rec.ID, rec.Kind.String(), rec.Scope.String(), rec.Key, rec.Body})
+		views = append(views, storeRecordView{rec.ID, rec.Kind.String(), rec.Scope.String(), rec.Key, rec.Body, rec.LifecycleStatus(), rec.Provenance, rec.VerifiedAt, rec.ReviewAfter, rec.Supersedes, rec.ReplacedBy})
 	}
 	writeJSONResp(w, map[string]any{"records": views})
 }
@@ -359,11 +366,21 @@ func (s *controlServer) handleStoreList(w http.ResponseWriter, r *http.Request) 
 // stable id when blank (kind/slug(key)), journals the op, and regenerates CLAUDE.md.
 func (s *controlServer) handleStorePut(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		ID    string `json:"id"`
-		Kind  int    `json:"kind"`
-		Scope int    `json:"scope"`
-		Key   string `json:"key"`
-		Body  string `json:"body"`
+		ID          string `json:"id"`
+		Kind        int    `json:"kind"`
+		Scope       int    `json:"scope"`
+		Key         string `json:"key"`
+		Body        string `json:"body"`
+		Status      string `json:"status"`
+		Supersedes  string `json:"supersedes"`
+		ReplacedBy  string `json:"replaced_by"`
+		ClaimClass  string `json:"claim_class"`
+		VerifiedAt  int64  `json:"verified_at"`
+		ReviewAfter int64  `json:"review_after"`
+		Verifier    string `json:"verifier"`
+		Evidence    string `json:"evidence"`
+		Confidence  int    `json:"confidence"`
+		Approval    string `json:"approval"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
@@ -371,7 +388,10 @@ func (s *controlServer) handleStorePut(w http.ResponseWriter, r *http.Request) {
 	}
 	root := s.reqRoot(r)
 	st := s.storeFor(root)
-	rec := store.Record{ID: body.ID, Kind: store.Kind(body.Kind), Scope: store.Scope(body.Scope), Key: body.Key, Body: body.Body}
+	rec := store.Record{ID: body.ID, Kind: store.Kind(body.Kind), Scope: store.Scope(body.Scope), Key: body.Key, Body: body.Body,
+		Status: body.Status, Supersedes: body.Supersedes, ReplacedBy: body.ReplacedBy, ClaimClass: body.ClaimClass,
+		VerifiedAt: body.VerifiedAt, ReviewAfter: body.ReviewAfter, Verifier: body.Verifier, Evidence: body.Evidence,
+		Confidence: body.Confidence, Approval: body.Approval, Provenance: store.ProvenanceHuman}
 	if strings.TrimSpace(rec.ID) == "" {
 		base := slug(rec.Key)
 		if base == "" {
@@ -383,6 +403,12 @@ func (s *controlServer) handleStorePut(w http.ResponseWriter, r *http.Request) {
 		rec.ID = rec.Kind.String() + "/" + base
 	}
 	before, had := st.Get(rec.ID)
+	if had && rec.Status == "" {
+		rec.Status = before.Status
+	}
+	if !had && rec.Status == "" {
+		rec.Status = store.StatusActive
+	}
 	if err := st.Put(rec); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return

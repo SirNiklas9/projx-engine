@@ -40,7 +40,7 @@ func readHooks(t *testing.T, path string) map[string]any {
 }
 
 // TestMergeGlobalHookFreshFile: an absent settings.json gets all five ProjX events, each
-// with the right timeout, and PreToolUse carries the Read|Edit|Write matcher.
+// with the right timeout, and PreToolUse covers Claude's shell and file mutation tools.
 func TestMergeGlobalHookFreshFile(t *testing.T) {
 	home := isolateHome(t)
 	path := filepath.Join(home, ".claude", "settings.json")
@@ -67,14 +67,48 @@ func TestMergeGlobalHookFreshFile(t *testing.T) {
 	}
 	// PreToolUse must carry the matcher.
 	pre := hooks["PreToolUse"].([]any)[0].(map[string]any)
-	if pre["matcher"] != "Read|Edit|Write" {
-		t.Errorf("PreToolUse matcher = %v; want Read|Edit|Write", pre["matcher"])
+	wantMatcher := "Bash|Read|Edit|Write|MultiEdit|NotebookEdit"
+	if pre["matcher"] != wantMatcher {
+		t.Errorf("PreToolUse matcher = %v; want %s", pre["matcher"], wantMatcher)
 	}
 	// SessionStart timeout must be 30.
 	ss := hooks["SessionStart"].([]any)[0].(map[string]any)
 	inner := ss["hooks"].([]any)[0].(map[string]any)
 	if int(inner["timeout"].(float64)) != 30 {
 		t.Errorf("SessionStart timeout = %v; want 30", inner["timeout"])
+	}
+}
+
+func TestMergeGlobalHookRepairsMatcherDrift(t *testing.T) {
+	home := isolateHome(t)
+	path := filepath.Join(home, ".claude", "settings.json")
+	if _, _, err := mergeGlobalHook(path); err != nil {
+		t.Fatal(err)
+	}
+
+	root := map[string]any{}
+	data, err := os.ReadFile(path)
+	if err != nil || json.Unmarshal(data, &root) != nil {
+		t.Fatalf("load generated settings: %v", err)
+	}
+	hooks := root["hooks"].(map[string]any)
+	pre := hooks["PreToolUse"].([]any)[0].(map[string]any)
+	pre["matcher"] = "Read|Edit|Write" // prior release, same hook command
+	data, _ = json.Marshal(root)
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	added, _, err := mergeGlobalHook(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(added) != 1 || added[0] != "PreToolUse" {
+		t.Fatalf("matcher drift refresh = %v; want [PreToolUse]", added)
+	}
+	pre = readHooks(t, path)["PreToolUse"].([]any)[0].(map[string]any)
+	if pre["matcher"] != projxHookSpecs[2].matcher {
+		t.Fatalf("matcher was not repaired: %v", pre["matcher"])
 	}
 }
 

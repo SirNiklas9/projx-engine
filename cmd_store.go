@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	store "github.com/SirNiklas9/projx-store"
 )
@@ -313,6 +314,8 @@ func storeList(absRoot string, args []string) {
 	fs := flag.NewFlagSet("store list", flag.ExitOnError)
 	kindFlag := fs.String("kind", "", "filter by kind name")
 	scopeFlag := fs.String("scope", "", "filter by scope: global|workspace|project")
+	statusFlag := fs.String("status", "", "filter by lifecycle: candidate|active|superseded|rejected")
+	allStatuses := fs.Bool("all-statuses", false, "include non-authoritative lifecycle states")
 	_ = fs.Parse(args)
 
 	f := store.Filter{}
@@ -330,6 +333,7 @@ func storeList(absRoot string, args []string) {
 		}
 		f.Scope = &s
 	}
+	applyLifecycleFilter(&f, *statusFlag, *allStatuses)
 
 	st := openStore(absRoot)
 	defer st.Close()
@@ -346,6 +350,8 @@ func storeQuery(absRoot string, args []string) {
 	fs := flag.NewFlagSet("store query", flag.ExitOnError)
 	kindFlag := fs.String("kind", "", "filter by kind name")
 	scopeFlag := fs.String("scope", "", "filter by scope: global|workspace|project")
+	statusFlag := fs.String("status", "", "filter by lifecycle: candidate|active|superseded|rejected")
+	allStatuses := fs.Bool("all-statuses", false, "include non-authoritative lifecycle states")
 	keyFlag := fs.String("key", "", "case-insensitive substring match on record key")
 	textFlag := fs.String("text", "", "case-insensitive substring match on record body")
 	_ = fs.Parse(args)
@@ -365,6 +371,7 @@ func storeQuery(absRoot string, args []string) {
 		}
 		f.Scope = &s
 	}
+	applyLifecycleFilter(&f, *statusFlag, *allStatuses)
 
 	keyLower := strings.ToLower(*keyFlag)
 	textLower := strings.ToLower(*textFlag)
@@ -437,6 +444,15 @@ func storeQuery(absRoot string, args []string) {
 	}
 }
 
+func applyLifecycleFilter(f *store.Filter, status string, all bool) {
+	status = strings.ToLower(strings.TrimSpace(status))
+	if status != "" && !validLifecycleStatus(status) {
+		die("--status must be candidate|active|superseded|rejected")
+	}
+	f.Status = status
+	f.IncludeNonAuthoritative = all
+}
+
 func storeCommit(absRoot string, args []string) {
 	fs := flag.NewFlagSet("store commit", flag.ExitOnError)
 	kindFlag := fs.String("kind", "", "kind: convention|adr|doc|declared-structure|gate-rule")
@@ -445,6 +461,17 @@ func storeCommit(absRoot string, args []string) {
 	scopeFlag := fs.String("scope", "project", "scope: project|global|workspace")
 	idFlag := fs.String("id", "", "record id (derived from kind/slug(key) if omitted)")
 	byFlag := fs.String("by", "ui", "actor: ui|agent")
+	statusFlag := fs.String("status", "", "lifecycle: candidate|active|superseded|rejected")
+	supersedesFlag := fs.String("supersedes", "", "record id this claim supersedes")
+	replacedByFlag := fs.String("replaced-by", "", "record id that replaces this claim")
+	claimClassFlag := fs.String("claim-class", "", "stable|volatile or a domain-specific class")
+	verifiedAtFlag := fs.String("verified-at", "", "verification time (YYYY-MM-DD or RFC3339)")
+	reviewAfterFlag := fs.String("review-after", "", "review deadline (YYYY-MM-DD or RFC3339)")
+	verifierFlag := fs.String("verifier", "", "verification mechanism or identity")
+	evidenceFlag := fs.String("evidence", "", "evidence reference or digest")
+	modelFlag := fs.String("model", "", "model that produced the claim")
+	confidenceFlag := fs.Int("confidence", 0, "optional confidence 0..100")
+	approvalFlag := fs.String("approval", "", "approval state or identity")
 	_ = fs.Parse(args)
 
 	// In agent context, always treat the actor as "agent" regardless of --by.
@@ -481,17 +508,96 @@ func storeCommit(absRoot string, args []string) {
 	defer st.Close()
 
 	var bp *store.Record
-	if before, had := st.Get(recID); had {
-		bp = &before
-	}
-
 	rec := store.Record{ID: recID, Kind: k, Scope: sc, Key: *keyFlag, Body: *bodyFlag,
 		Provenance: store.ProvenanceFor(effectiveBy)} // human-confirmed (ui) | agent-asserted (agent)
+	if before, had := st.Get(recID); had {
+		bp = &before
+		if effectiveBy == "agent" && before.Authoritative() {
+			die("agent cannot overwrite authoritative record %q; commit a new candidate with --supersedes %s", recID, recID)
+		}
+		// Lifecycle is durable metadata. An ordinary body edit must not silently erase it.
+		rec.Status, rec.Supersedes, rec.ReplacedBy = before.Status, before.Supersedes, before.ReplacedBy
+		rec.ClaimClass, rec.VerifiedAt, rec.ReviewAfter = before.ClaimClass, before.VerifiedAt, before.ReviewAfter
+		rec.Verifier, rec.Evidence, rec.Model = before.Verifier, before.Evidence, before.Model
+		rec.Confidence, rec.Approval = before.Confidence, before.Approval
+	} else if effectiveBy == "agent" {
+		rec.Status = store.StatusCandidate
+	} else {
+		rec.Status = store.StatusActive
+	}
+
+	visited := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { visited[f.Name] = true })
+	if visited["status"] {
+		rec.Status = strings.ToLower(strings.TrimSpace(*statusFlag))
+	}
+	if !validLifecycleStatus(rec.Status) {
+		die("--status must be candidate|active|superseded|rejected")
+	}
+	if effectiveBy == "agent" && rec.LifecycleStatus() != store.StatusCandidate {
+		die("agent-authored knowledge must remain candidate until human or deterministic verification promotes it")
+	}
+	if visited["supersedes"] {
+		rec.Supersedes = strings.TrimSpace(*supersedesFlag)
+	}
+	if visited["replaced-by"] {
+		rec.ReplacedBy = strings.TrimSpace(*replacedByFlag)
+	}
+	if visited["claim-class"] {
+		rec.ClaimClass = strings.TrimSpace(*claimClassFlag)
+	}
+	if visited["verified-at"] {
+		rec.VerifiedAt = parseLifecycleTime("--verified-at", *verifiedAtFlag)
+	}
+	if visited["review-after"] {
+		rec.ReviewAfter = parseLifecycleTime("--review-after", *reviewAfterFlag)
+	}
+	if visited["verifier"] {
+		rec.Verifier = strings.TrimSpace(*verifierFlag)
+	}
+	if visited["evidence"] {
+		rec.Evidence = strings.TrimSpace(*evidenceFlag)
+	}
+	if visited["model"] {
+		rec.Model = strings.TrimSpace(*modelFlag)
+	}
+	if visited["confidence"] {
+		rec.Confidence = *confidenceFlag
+	}
+	if rec.Confidence < 0 || rec.Confidence > 100 {
+		die("--confidence must be between 0 and 100")
+	}
+	if visited["approval"] {
+		rec.Approval = strings.TrimSpace(*approvalFlag)
+	}
 	if err := st.Put(rec); err != nil {
 		die("put: %v", err)
 	}
 	recordStoreOp(absRoot, "put", effectiveBy, bp, &rec)
 	fmt.Println("committed", recID)
+}
+
+func validLifecycleStatus(s string) bool {
+	switch s {
+	case "", store.StatusCandidate, store.StatusActive, store.StatusSuperseded, store.StatusRejected:
+		return true
+	default:
+		return false
+	}
+}
+
+func parseLifecycleTime(name, value string) int64 {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0
+	}
+	for _, layout := range []string{time.RFC3339, "2006-01-02"} {
+		if parsed, err := time.Parse(layout, value); err == nil {
+			return parsed.UnixMilli()
+		}
+	}
+	die("%s must be YYYY-MM-DD or RFC3339", name)
+	return 0
 }
 
 func storeRm(absRoot string, args []string) {

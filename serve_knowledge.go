@@ -16,15 +16,16 @@ import (
 )
 
 func knowledgeScopeFilter(q string) (store.Filter, string) {
+	all := func(f store.Filter) store.Filter { f.IncludeNonAuthoritative = true; return f }
 	switch strings.ToLower(strings.TrimSpace(q)) {
 	case "workspace":
-		return store.InScope(store.ScopeWorkspace), "workspace"
+		return all(store.InScope(store.ScopeWorkspace)), "workspace"
 	case "project":
-		return store.InScope(store.ScopeProject), "project"
+		return all(store.InScope(store.ScopeProject)), "project"
 	case "all":
-		return store.Filter{}, "all"
+		return store.Filter{IncludeNonAuthoritative: true}, "all"
 	default:
-		return store.InScope(store.ScopeGlobal), "global"
+		return all(store.InScope(store.ScopeGlobal)), "global"
 	}
 }
 
@@ -52,7 +53,7 @@ func (s *controlServer) handleKnowledgeMerge(w http.ResponseWriter, r *http.Requ
 	}
 	root := s.reqRoot(r)
 	st := s.storeFor(root)
-	res := store.Merge(st.List(store.Filter{}), req.Records)
+	res := store.Merge(store.ListAll(st), req.Records)
 	persisted := 0
 	for _, rec := range res.Merged {
 		if st.Put(rec) == nil {

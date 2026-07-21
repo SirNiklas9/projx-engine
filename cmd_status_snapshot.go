@@ -51,22 +51,26 @@ type StatusAgent struct {
 }
 
 type StatusSnapshot struct {
-	GeneratedAt  time.Time     `json:"generated_at"`
-	ActiveRoot   string        `json:"active_root,omitempty"`
-	ProjectName  string        `json:"project_name,omitempty"`
-	Project      bool          `json:"project"`
-	RecordCount  int           `json:"record_count"`
-	GateCount    int           `json:"gate_count"`
-	ADRCount     int           `json:"adr_count"`
-	NewestADR    int64         `json:"newest_adr,omitempty"`
-	ADRFresh     bool          `json:"adr_fresh"`
-	ADRAgeDays   int           `json:"adr_age_days,omitempty"`
-	Verification string        `json:"verification"`
-	Modes        StatusModes   `json:"modes"`
-	Health       StatusHealth  `json:"health"`
-	LastAction   string        `json:"last_action,omitempty"`
-	ContextBytes int           `json:"context_bytes,omitempty"`
-	Agents       []StatusAgent `json:"agents"`
+	GeneratedAt     time.Time     `json:"generated_at"`
+	ActiveRoot      string        `json:"active_root,omitempty"`
+	ProjectName     string        `json:"project_name,omitempty"`
+	Project         bool          `json:"project"`
+	RecordCount     int           `json:"record_count"`
+	CandidateCount  int           `json:"candidate_count"`
+	ReviewDueCount  int           `json:"review_due_count"`
+	SupersededCount int           `json:"superseded_count"`
+	RejectedCount   int           `json:"rejected_count"`
+	GateCount       int           `json:"gate_count"`
+	ADRCount        int           `json:"adr_count"`
+	NewestADR       int64         `json:"newest_adr,omitempty"`
+	ADRFresh        bool          `json:"adr_fresh"`
+	ADRAgeDays      int           `json:"adr_age_days,omitempty"`
+	Verification    string        `json:"verification"`
+	Modes           StatusModes   `json:"modes"`
+	Health          StatusHealth  `json:"health"`
+	LastAction      string        `json:"last_action,omitempty"`
+	ContextBytes    int           `json:"context_bytes,omitempty"`
+	Agents          []StatusAgent `json:"agents"`
 
 	home      string
 	crumb     statusCrumb
@@ -120,7 +124,25 @@ func buildStatusSnapshot(cwd, sid string) StatusSnapshot {
 	}
 	defer st.Close()
 	s.Health.Store = true
-	for _, r := range st.List(store.InScope(store.ScopeProject)) {
+	projectFilter := store.InScope(store.ScopeProject)
+	projectFilter.IncludeNonAuthoritative = true
+	nowMillis := s.GeneratedAt.UnixMilli()
+	s.ADRFresh = true
+	for _, r := range st.List(projectFilter) {
+		switch r.LifecycleStatus() {
+		case store.StatusCandidate:
+			s.CandidateCount++
+			continue
+		case store.StatusSuperseded:
+			s.SupersededCount++
+			continue
+		case store.StatusRejected:
+			s.RejectedCount++
+			continue
+		}
+		if r.ReviewDueAt(nowMillis) {
+			s.ReviewDueCount++
+		}
 		if r.Kind != store.KDeclaredStructure {
 			s.RecordCount++
 		}
@@ -129,6 +151,9 @@ func buildStatusSnapshot(cwd, sid string) StatusSnapshot {
 		}
 		if r.Kind == store.KADR {
 			s.ADRCount++
+			if r.ReviewDueAt(nowMillis) || (r.ReviewAfter == 0 && r.UpdatedAt > 0 && s.GeneratedAt.Sub(time.UnixMilli(r.UpdatedAt)) > 90*24*time.Hour) {
+				s.ADRFresh = false
+			}
 			if r.UpdatedAt > s.NewestADR {
 				s.NewestADR = r.UpdatedAt
 			}
@@ -140,7 +165,6 @@ func buildStatusSnapshot(cwd, sid string) StatusSnapshot {
 		if s.ADRAgeDays < 0 {
 			s.ADRAgeDays = 0
 		}
-		s.ADRFresh = s.ADRAgeDays <= 90
 	}
 	mcpCommands := configuredProjxMCPCommands(s.ActiveRoot)
 	s.Health.MCP = len(mcpCommands) > 0
@@ -301,6 +325,12 @@ func renderStatusCompact(s StatusSnapshot) string {
 		return "projx global floor"
 	}
 	parts := []string{"projx", s.ProjectName, fmt.Sprintf("%d rec", s.RecordCount), fmt.Sprintf("%d gates", s.GateCount), fmt.Sprintf("%d agents", len(s.Agents))}
+	if s.CandidateCount > 0 {
+		parts = append(parts, fmt.Sprintf("%d candidate", s.CandidateCount))
+	}
+	if s.ReviewDueCount > 0 {
+		parts = append(parts, fmt.Sprintf("%d review-due", s.ReviewDueCount))
+	}
 	if s.Modes.Dispatcher {
 		parts = append(parts, "dispatcher")
 	}

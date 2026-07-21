@@ -10,11 +10,17 @@ import (
 
 // storeRecordView is the string-typed record shape the Workbench frontend speaks.
 type storeRecordView struct {
-	ID    string `json:"id"`
-	Kind  string `json:"kind"`
-	Scope string `json:"scope"`
-	Key   string `json:"key"`
-	Body  string `json:"body"`
+	ID          string `json:"id"`
+	Kind        string `json:"kind"`
+	Scope       string `json:"scope"`
+	Key         string `json:"key"`
+	Body        string `json:"body"`
+	Status      string `json:"status"`
+	Provenance  string `json:"provenance,omitempty"`
+	VerifiedAt  int64  `json:"verified_at,omitempty"`
+	ReviewAfter int64  `json:"review_after,omitempty"`
+	Supersedes  string `json:"supersedes,omitempty"`
+	ReplacedBy  string `json:"replaced_by,omitempty"`
 }
 
 func handleStoreList(c *pulpgin.Context) {
@@ -24,19 +30,29 @@ func handleStoreList(c *pulpgin.Context) {
 		return
 	}
 	views := []storeRecordView{}
-	for _, rec := range s.List(store.Filter{}) {
-		views = append(views, storeRecordView{rec.ID, rec.Kind.String(), rec.Scope.String(), rec.Key, rec.Body})
+	for _, rec := range store.ListAll(s) {
+		views = append(views, storeRecordView{rec.ID, rec.Kind.String(), rec.Scope.String(), rec.Key, rec.Body, rec.LifecycleStatus(), rec.Provenance, rec.VerifiedAt, rec.ReviewAfter, rec.Supersedes, rec.ReplacedBy})
 	}
 	c.JSON(200, pulpgin.H{"records": views})
 }
 
 func handleStorePut(c *pulpgin.Context) {
 	var req struct {
-		ID    string `json:"id"`
-		Kind  int    `json:"kind"`
-		Scope int    `json:"scope"`
-		Key   string `json:"key"`
-		Body  string `json:"body"`
+		ID          string `json:"id"`
+		Kind        int    `json:"kind"`
+		Scope       int    `json:"scope"`
+		Key         string `json:"key"`
+		Body        string `json:"body"`
+		Status      string `json:"status"`
+		Supersedes  string `json:"supersedes"`
+		ReplacedBy  string `json:"replaced_by"`
+		ClaimClass  string `json:"claim_class"`
+		VerifiedAt  int64  `json:"verified_at"`
+		ReviewAfter int64  `json:"review_after"`
+		Verifier    string `json:"verifier"`
+		Evidence    string `json:"evidence"`
+		Confidence  int    `json:"confidence"`
+		Approval    string `json:"approval"`
 	}
 	if err := c.BindJSON(&req); err != nil {
 		c.JSON(400, pulpgin.H{"error": "bad request"})
@@ -47,7 +63,10 @@ func handleStorePut(c *pulpgin.Context) {
 		c.JSON(503, pulpgin.H{"error": "store unavailable: " + err.Error()})
 		return
 	}
-	rec := store.Record{ID: req.ID, Kind: store.Kind(req.Kind), Scope: store.Scope(req.Scope), Key: req.Key, Body: req.Body}
+	rec := store.Record{ID: req.ID, Kind: store.Kind(req.Kind), Scope: store.Scope(req.Scope), Key: req.Key, Body: req.Body,
+		Status: req.Status, Supersedes: req.Supersedes, ReplacedBy: req.ReplacedBy, ClaimClass: req.ClaimClass,
+		VerifiedAt: req.VerifiedAt, ReviewAfter: req.ReviewAfter, Verifier: req.Verifier, Evidence: req.Evidence,
+		Confidence: req.Confidence, Approval: req.Approval, Provenance: store.ProvenanceHuman}
 	if strings.TrimSpace(rec.ID) == "" {
 		base := slugID(rec.Key)
 		if base == "" {
@@ -59,6 +78,12 @@ func handleStorePut(c *pulpgin.Context) {
 		rec.ID = rec.Kind.String() + "/" + base
 	}
 	before, had := s.Get(rec.ID)
+	if had && rec.Status == "" {
+		rec.Status = before.Status
+	}
+	if !had && rec.Status == "" {
+		rec.Status = store.StatusActive
+	}
 	if err := s.Put(rec); err != nil {
 		c.JSON(400, pulpgin.H{"error": err.Error()})
 		return

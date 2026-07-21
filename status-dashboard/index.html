@@ -195,7 +195,11 @@
       text('records', snapshot.record_count);
       text('adrs', snapshot.adr_count);
       text('gates', snapshot.gate_count);
-      text('adr-detail', snapshot.adr_fresh ? `ADRs · fresh · ${snapshot.adr_age_days || 0}d` : `ADRs · review due · ${snapshot.adr_age_days || 0}d`);
+      const lifecycle = [];
+      if (snapshot.review_due_count) lifecycle.push(`${snapshot.review_due_count} review due`);
+      if (snapshot.candidate_count) lifecycle.push(`${snapshot.candidate_count} candidate`);
+      if (snapshot.superseded_count) lifecycle.push(`${snapshot.superseded_count} superseded`);
+      text('adr-detail', lifecycle.length ? lifecycle.join(' · ') : `ADRs · current · ${snapshot.adr_age_days || 0}d`);
       const modes = Object.entries(snapshot.modes).filter(([, on]) => on).map(([name]) => name.replaceAll('_', ' '));
       text('modes', modes.length ? modes.join(', ') : 'normal');
       text('action', snapshot.last_action || 'none');

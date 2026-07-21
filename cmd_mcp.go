@@ -140,13 +140,16 @@ func mcpTools() []map[string]any {
 		},
 		{
 			"name":        "store_commit",
-			"description": "Save a durable fact into this project's ProjX store as a doc/convention/adr record (NOT a markdown file). Use when you learn something worth keeping.",
+			"description": "Stage a durable AI discovery in this project's ProjX store as a non-authoritative candidate (NOT a markdown file). Verification or human review promotes it.",
 			"inputSchema": obj(map[string]any{
-				"kind":  mcpStr("doc | convention | adr"),
-				"key":   mcpStr("a short key/title"),
-				"body":  mcpStr("the fact to remember"),
-				"scope": mcpStr("optional: project (default) | workspace | global"),
-				"root":  mcpStr("optional repo root"),
+				"kind":        mcpStr("doc | convention | adr"),
+				"key":         mcpStr("a short key/title"),
+				"body":        mcpStr("the fact to remember"),
+				"scope":       mcpStr("optional: project (default) | workspace | global"),
+				"supersedes":  mcpStr("optional record id this candidate may replace"),
+				"claim_class": mcpStr("optional stable|volatile or domain-specific class"),
+				"evidence":    mcpStr("optional live-source, test, or file reference"),
+				"root":        mcpStr("optional repo root"),
 			}, "kind", "key", "body"),
 		},
 	}
@@ -244,8 +247,13 @@ func mcpToolCall(req mcpReq, defaultRoot string) mcpResp {
 		if !ok {
 			return text("kind must be one of: doc, convention, adr", true)
 		}
-		rec := store.Record{Kind: kind, Scope: mcpScope(arg("scope")), Key: arg("key"), Body: arg("body")}
+		rec := store.Record{Kind: kind, Scope: mcpScope(arg("scope")), Key: arg("key"), Body: arg("body"),
+			Status: store.StatusCandidate, Provenance: store.ProvenanceAgent, Supersedes: arg("supersedes"),
+			ClaimClass: arg("claim_class"), Evidence: arg("evidence"), Model: os.Getenv("PROJX_MODEL")}
 		rec.ID = kind.String() + "/" + slug(rec.Key)
+		if before, exists := st.Get(rec.ID); exists && before.Authoritative() {
+			return text("commit refused: agent cannot overwrite authoritative "+rec.ID+"; use a distinct key and set supersedes", true)
+		}
 		if err := st.Put(rec); err != nil {
 			return text("commit failed: "+err.Error(), true)
 		}

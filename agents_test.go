@@ -33,11 +33,24 @@ func TestPrepareAgentContext(t *testing.T) {
 	if _, err := os.Stat(ctxFile); err != nil {
 		t.Fatalf("context file missing on disk: %v", err)
 	}
-	if !strings.Contains(env["PROJX_STORE_CONTEXT"], "secret/**") {
-		t.Error("seeded gate not present in compiled context")
+	if !strings.Contains(env["PROJX_STORE_CONTEXT"], "dispatch don't mutate") {
+		t.Error("seeded project law not present in compiled context")
 	}
 	if env["PROJX_AGENT_CONTEXT"] != "1" {
 		t.Error("PROJX_AGENT_CONTEXT flag not set")
+	}
+	if env["PROJX_ROLE"] != "worker" {
+		t.Error("ProjX-launched agent is not marked as an independently governed worker")
+	}
+	for _, required := range []string{
+		"YOUR CONTRACT",
+		"READ BEFORE ACTING",
+		"KNOWLEDGE OUT = store.commit",
+		"OFF-LIMITS IS LAW",
+	} {
+		if !strings.Contains(env["PROJX_STORE_CONTEXT"], required) {
+			t.Errorf("worker lifecycle context missing required policy %q", required)
+		}
 	}
 
 	// The context file is threaded into the agent's invocation (uncaged path too).

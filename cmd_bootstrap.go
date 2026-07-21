@@ -183,7 +183,7 @@ func lifecycleHookSpecs(preToolMatcher string) []hookSpec {
 
 // projxHookSpecs is the canonical ProjX hook registration — the five lifecycle events
 // and their timeouts. This is the single source the merge writes.
-var projxHookSpecs = lifecycleHookSpecs("Read|Edit|Write")
+var projxHookSpecs = lifecycleHookSpecs("Bash|Read|Edit|Write|MultiEdit|NotebookEdit")
 
 // mergeGlobalHook parses ~/.claude/settings.json (creating it if absent), adds the ProjX
 // hook entry for each lifecycle event that doesn't already have one, and writes the file
@@ -216,6 +216,14 @@ func mergeGlobalHook(settingsPath string) (added, skipped []string, err error) {
 		// is already present. This makes a re-run of `init --global` REPAIR a stale hook,
 		// not just skip it.
 		kept, hasCurrent, dropped := pruneStaleProjxGroups(arr, want)
+		// A binary upgrade can change an adapter's matcher/timeouts without changing
+		// the hook command. Treat that registration drift exactly like a stale binary
+		// path so `init --global` self-heals it instead of silently skipping it.
+		if hasCurrent && !hookGroupHasSpec(kept, want, s) {
+			kept = dropHookGroupCommand(kept, want)
+			hasCurrent = false
+			dropped = true
+		}
 		if hasCurrent && !dropped {
 			skipped = append(skipped, s.event)
 			continue // already up to date, untouched
@@ -285,6 +293,48 @@ func pruneStaleProjxGroups(arr []any, want string) (kept []any, hasCurrent, drop
 		}
 	}
 	return kept, hasCurrent, dropped
+}
+
+// hookGroupHasSpec reports whether the current command is registered with the
+// adapter's current matcher and timeout. It lets bootstrap repair configuration
+// drift even when the installed binary path itself has not changed.
+func hookGroupHasSpec(groups []any, want string, spec hookSpec) bool {
+	for _, g := range groups {
+		gm, ok := g.(map[string]any)
+		if !ok || projxGroupCommand(g) != want {
+			continue
+		}
+		matcher, _ := gm["matcher"].(string)
+		if matcher != spec.matcher {
+			continue
+		}
+		inner, _ := gm["hooks"].([]any)
+		if len(inner) == 0 {
+			continue
+		}
+		hm, _ := inner[0].(map[string]any)
+		switch timeout := hm["timeout"].(type) {
+		case int:
+			if timeout == spec.timeout {
+				return true
+			}
+		case float64: // JSON-decoded settings
+			if int(timeout) == spec.timeout {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func dropHookGroupCommand(groups []any, command string) []any {
+	kept := make([]any, 0, len(groups))
+	for _, g := range groups {
+		if projxGroupCommand(g) != command {
+			kept = append(kept, g)
+		}
+	}
+	return kept
 }
 
 // hookGroupsHaveProjx reports whether any hook group in an event's array already carries

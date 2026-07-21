@@ -16,7 +16,7 @@ Windows, macOS, and Linux. A different harness (Neovim, JetBrains) gets its own 
 |---|---|
 | `SessionStart` | refreshes the code map (silent), then injects the **lean floor** (protocol + law) and starts a fresh session checkpoint |
 | `UserPromptSubmit` | re-asserts the law + injects only the **new/changed** store records relevant to the prompt (task-sliced **delta**) |
-| `PreToolUse` (Read\|Edit\|Write) | blocks a tool call whose target path is off-limits (exit 2 + reason) |
+| `PreToolUse` (Bash\|Read\|Edit\|Write\|MultiEdit\|NotebookEdit) | blocks a tool call whose target path or shell command is off-limits (exit 2 + reason) |
 | `PreCompact` | marks the floor lost so the next turn re-sends protocol+law+slice after compaction |
 | `Stop` | **suggest-only**: if the user said `@remember` but nothing was committed, nudges once (exit 2); silent otherwise |
 
@@ -79,8 +79,8 @@ merge-safely for you. Then start Claude Code in the project.
 - **Token cost:** `UserPromptSubmit` sends a task-sliced **delta** — the binding law
   plus only the records new or changed for that prompt; unchanged records already in
   context are not re-sent, and the full reference set never dumps.
-- **Matcher** is `Read|Edit|Write`. Add `MultiEdit|NotebookEdit` to the `PreToolUse`
-  matcher in `settings.json` to gate those too.
+- **Matcher** is `Bash|Read|Edit|Write|MultiEdit|NotebookEdit`, so shell commands and
+  every supported Claude file-edit surface pass through the same gate.
 - **Portability:** the handler is pure Go (no bash/`jq`), and gate matching is
   separator-normalized, so the same connector works on Windows, macOS, and Linux.
 

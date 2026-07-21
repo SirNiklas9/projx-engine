@@ -44,6 +44,11 @@ func mergeCodexHooks(path string) (added, skipped []string, err error) {
 	for _, s := range codexHookSpecs {
 		arr, _ := hooks[s.event].([]any)
 		kept, hasCurrent, dropped := pruneStaleProjxGroups(arr, want)
+		if hasCurrent && !hookGroupHasSpec(kept, want, s) {
+			kept = dropHookGroupCommand(kept, want)
+			hasCurrent = false
+			dropped = true
+		}
 		if hasCurrent && !dropped {
 			if s.event == "SessionStart" {
 				var dashboardChanged bool

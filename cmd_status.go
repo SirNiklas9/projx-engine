@@ -159,7 +159,7 @@ func runStatusDashboard(absRoot string, args []string) {
 			fmt.Println(renderStatusCompact(s))
 		} else {
 			fmt.Println(renderStatusCompact(s))
-			fmt.Printf("  scope: %s\n  health: store=%t mcp=%t hooks=%t binary=%t stale=%t\n  knowledge: %d ADRs (newest %s)\n", s.ActiveRoot, s.Health.Store, s.Health.MCP, s.Health.Hooks, s.Health.Binary, s.Health.BinaryStale, s.ADRCount, statusTime(s.NewestADR))
+			fmt.Printf("  scope: %s\n  health: store=%t mcp=%t hooks=%t binary=%t stale=%t\n  knowledge: %d ADRs (newest %s), %d candidates, %d review due, %d superseded\n", s.ActiveRoot, s.Health.Store, s.Health.MCP, s.Health.Hooks, s.Health.Binary, s.Health.BinaryStale, s.ADRCount, statusTime(s.NewestADR), s.CandidateCount, s.ReviewDueCount, s.SupersededCount)
 			for _, a := range s.Agents {
 				fmt.Printf("  agent: %s %s (%d/%d) %s\n", a.Project, a.Operation, a.Step, a.Total, a.State)
 			}

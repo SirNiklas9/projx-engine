@@ -5,6 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
+
+	store "github.com/SirNiklas9/projx-store"
 )
 
 func TestClaudeStatuslineGoldenGlobalFloor(t *testing.T) {
@@ -61,6 +64,39 @@ func TestStatusSnapshotShowsFloatingScope(t *testing.T) {
 	}
 	if s.LastAction != "ctx" || s.ContextBytes != 42 {
 		t.Fatalf("crumb missing: %#v", s)
+	}
+}
+
+func TestStatusSnapshotReportsKnowledgeLifecycle(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("PROJX_YOURS_DIR", filepath.Join(t.TempDir(), "yours"))
+	if err := os.MkdirAll(filepath.Join(root, ".projx"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	st, err := openStoreSafe(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UnixMilli()
+	for _, r := range []store.Record{
+		{ID: "adr/current", Kind: store.KADR, Scope: store.ScopeProject, Key: "current", Status: store.StatusActive, UpdatedAt: now},
+		{ID: "doc/due", Kind: store.KDoc, Scope: store.ScopeProject, Key: "due", Status: store.StatusActive, ReviewAfter: now - 1},
+		{ID: "doc/candidate", Kind: store.KDoc, Scope: store.ScopeProject, Key: "candidate", Status: store.StatusCandidate},
+		{ID: "adr/old", Kind: store.KADR, Scope: store.ScopeProject, Key: "old", Status: store.StatusSuperseded},
+		{ID: "doc/rejected", Kind: store.KDoc, Scope: store.ScopeProject, Key: "rejected", Status: store.StatusRejected},
+	} {
+		if err := st.Put(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	st.Close()
+
+	s := buildStatusSnapshot(root, "")
+	if s.RecordCount != 2 || s.ADRCount != 1 || !s.ADRFresh {
+		t.Fatalf("active knowledge counts wrong: %+v", s)
+	}
+	if s.CandidateCount != 1 || s.ReviewDueCount != 1 || s.SupersededCount != 1 || s.RejectedCount != 1 {
+		t.Fatalf("lifecycle counts wrong: %+v", s)
 	}
 }
 

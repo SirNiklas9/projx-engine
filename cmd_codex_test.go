@@ -77,6 +77,9 @@ func TestHarnessLifecycleSpecsStayInParity(t *testing.T) {
 	if !strings.Contains(codexHookSpecs[2].matcher, "apply_patch") || strings.Contains(projxHookSpecs[2].matcher, "apply_patch") {
 		t.Fatalf("adapter-specific tool matchers lost: Claude=%q Codex=%q", projxHookSpecs[2].matcher, codexHookSpecs[2].matcher)
 	}
+	if !strings.Contains(projxHookSpecs[2].matcher, "Bash") {
+		t.Fatalf("Claude shell enforcement missing from PreToolUse matcher: %q", projxHookSpecs[2].matcher)
+	}
 }
 
 func TestCodexApplyPatchIsMutatingAndGated(t *testing.T) {

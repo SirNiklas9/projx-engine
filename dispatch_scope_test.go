@@ -64,6 +64,9 @@ func TestDispatchPerWorkerScope(t *testing.T) {
 	if !strings.Contains(ctxA, scA.Role) {
 		t.Error("worker A context missing its role banner")
 	}
+	if !strings.Contains(ctxA, "READ BEFORE ACTING") || !strings.Contains(ctxA, "KNOWLEDGE OUT = store.commit") {
+		t.Error("worker A did not carry the governed recall/learn lifecycle policy")
+	}
 
 	// Worker B: its step's doc + role, NOT the minecraft doc.
 	if !strings.Contains(ctxB, "billing/checkout") {
@@ -74,6 +77,9 @@ func TestDispatchPerWorkerScope(t *testing.T) {
 	}
 	if !strings.Contains(ctxB, scB.Role) {
 		t.Error("worker B context missing its role banner")
+	}
+	if !strings.Contains(ctxB, "READ BEFORE ACTING") || !strings.Contains(ctxB, "KNOWLEDGE OUT = store.commit") {
+		t.Error("worker B did not carry the governed recall/learn lifecycle policy")
 	}
 
 	// Law (the off-limits gate) is carried into every worker regardless of slice.
