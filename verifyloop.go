@@ -153,5 +153,6 @@ func runAgentHeadless(absRoot, task string) error {
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	cmd.SysProcAttr = quietSysProcAttr()
 	return cmd.Run()
 }

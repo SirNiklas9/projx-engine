@@ -160,5 +160,6 @@ func runHostShell(dir, command string) error {
 	c.Dir = dir
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr
+	c.SysProcAttr = quietSysProcAttr()
 	return c.Run()
 }

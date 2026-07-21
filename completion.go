@@ -119,6 +119,7 @@ func (c completer) completeCLI(prompt, model string) (string, bool) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
 	cmd.Dir = neutralTriageDir() // don't load the project's own hooks for a throwaway call
+	cmd.SysProcAttr = quietSysProcAttr()
 	out, err := cmd.Output()
 	if err != nil {
 		return "", false

@@ -25,12 +25,16 @@ const (
 	hresultAlreadyExists = int32(-2147023281) // 0x800700B7
 )
 
+const confinedProcessCreationFlags = windows.EXTENDED_STARTUPINFO_PRESENT |
+	windows.CREATE_UNICODE_ENVIRONMENT |
+	windows.CREATE_NO_WINDOW
+
 // securityCapabilities mirrors the Windows SECURITY_CAPABILITIES struct.
 type securityCapabilities struct {
-	AppContainerSid  *windows.SID
-	Capabilities     *windows.SIDAndAttributes
-	CapabilityCount  uint32
-	Reserved         uint32
+	AppContainerSid *windows.SID
+	Capabilities    *windows.SIDAndAttributes
+	CapabilityCount uint32
+	Reserved        uint32
 }
 
 var (
@@ -189,7 +193,7 @@ func (c appcontainerConfiner) LaunchConfined(policy Policy, argv []string, env [
 		nil,  // process security attrs
 		nil,  // thread security attrs
 		true, // inherit handles (for stdio)
-		windows.EXTENDED_STARTUPINFO_PRESENT|windows.CREATE_UNICODE_ENVIRONMENT,
+		confinedProcessCreationFlags,
 		envBlock,
 		dirPtr,
 		&siEx.StartupInfo,

@@ -85,6 +85,7 @@ func launchAgentUncaged(absRoot, task string) (int, error) {
 	cmd := exec.Command(name, argv...)
 	cmd.Dir = absRoot
 	cmd.Env = append(os.Environ(), kvSlice(env)...)
+	cmd.SysProcAttr = quietSysProcAttr()
 	if err := cmd.Run(); err != nil {
 		if ee, ok := err.(*exec.ExitError); ok {
 			return ee.ExitCode(), nil

@@ -14,6 +14,7 @@ package main
 //   Linux   — $HOME/.projx-confine-test-outside-<pid> (not under root or /tmp)
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -22,7 +23,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-	"context"
 
 	"github.com/SirNiklas9/projx-engine/internal/confine"
 )
@@ -79,6 +79,7 @@ func buildConfinedFakeAgent(t *testing.T) string {
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "go", "build", "-o", agentBin, srcFile)
+	cmd.SysProcAttr = quietSysProcAttr()
 	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -143,6 +144,7 @@ func TestAgentConfinementDenialEndToEnd(t *testing.T) {
 		"--root", root,
 		"agent", "run",
 	)
+	cmd.SysProcAttr = quietSysProcAttr()
 	cmd.Env = append(os.Environ(),
 		"PROJX_AGENT_CMD="+fakeAgent,
 		"PROJX_OUTSIDE_PATH="+outsidePath,

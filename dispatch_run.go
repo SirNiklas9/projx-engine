@@ -346,6 +346,7 @@ func runDispatchChild(self, absRoot string, argv []string, providerCmd string, e
 	cmd.Stdin = nil
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	cmd.SysProcAttr = quietSysProcAttr()
 	env := os.Environ()
 	if providerCmd != "" {
 		env = append(env, "PROJX_AGENT_CMD="+providerCmd)
@@ -369,6 +370,7 @@ func gitOutput(absRoot string, args ...string) (string, bool) {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = absRoot
 	cmd.Stdin = nil
+	cmd.SysProcAttr = quietSysProcAttr()
 	out, err := cmd.Output() // stderr discarded on purpose: a non-repo is not an error here
 	if err != nil {
 		return "", false

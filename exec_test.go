@@ -42,6 +42,7 @@ func buildEngine(t *testing.T, dir string) string {
 
 	// Build from the current module (main package in ".").
 	cmd := exec.CommandContext(ctx, "go", "build", "-o", enginePath, ".")
+	cmd.SysProcAttr = quietSysProcAttr()
 	cmd.Dir = moduleRoot(t)
 	out, err := cmd.CombinedOutput()
 	if err != nil {

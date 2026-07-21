@@ -97,6 +97,7 @@ func buildSecretFakeAgent(t *testing.T) string {
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "go", "build", "-o", bin, srcFile)
+	cmd.SysProcAttr = quietSysProcAttr()
 	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Skipf("could not build secret fake agent (skipping): %v\n%s", err, out)
@@ -179,6 +180,7 @@ func TestSecretInjectedUnderConfinement(t *testing.T) {
 		"--root", root,
 		"agent", "run",
 	)
+	cmd.SysProcAttr = quietSysProcAttr()
 	cmd.Env = append(os.Environ(),
 		"PROJX_AGENT_CMD="+fakeAgent,
 		"PROJX_SECRETS_DIR="+secretsDir,

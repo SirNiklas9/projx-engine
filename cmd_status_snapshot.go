@@ -183,11 +183,15 @@ func engineSourceIdentity(root string) (revision string, dirty bool) {
 	if err != nil || !strings.Contains(string(mod), "module github.com/SirNiklas9/projx-engine") {
 		return "", false
 	}
-	head, err := exec.Command("git", "-C", root, "rev-parse", "HEAD").Output()
+	headCmd := exec.Command("git", "-C", root, "rev-parse", "HEAD")
+	headCmd.SysProcAttr = quietSysProcAttr()
+	head, err := headCmd.Output()
 	if err != nil {
 		return "", false
 	}
-	status, err := exec.Command("git", "-C", root, "status", "--porcelain", "--untracked-files=all").Output()
+	statusCmd := exec.Command("git", "-C", root, "status", "--porcelain", "--untracked-files=all")
+	statusCmd.SysProcAttr = quietSysProcAttr()
+	status, err := statusCmd.Output()
 	if err != nil {
 		return strings.TrimSpace(string(head)), false
 	}

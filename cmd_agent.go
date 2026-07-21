@@ -379,6 +379,7 @@ func runAgentCmd(absRoot string, args []string) {
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	cmd.SysProcAttr = quietSysProcAttr()
 
 	if runErr := cmd.Run(); runErr != nil {
 		os.Exit(exitCode(runErr))
