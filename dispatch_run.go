@@ -545,7 +545,7 @@ func runDispatchStatus(absRoot string, args []string) {
 			fmt.Fprintf(os.Stderr, "dispatch: no run %q: %v\n", args[0], err)
 			os.Exit(1)
 		}
-		printDispatchManifest(m)
+		printDispatchManifest(absRoot, m)
 		return
 	}
 	runs := listDispatchManifests(absRoot)
@@ -573,7 +573,7 @@ func runDispatchStatus(absRoot string, args []string) {
 	}
 }
 
-func printDispatchManifest(m *dispatchManifest) {
+func printDispatchManifest(absRoot string, m *dispatchManifest) {
 	fmt.Printf("dispatch %s — %s\n", m.ID, m.State)
 	fmt.Printf("  message:  %s\n", m.Message)
 	fmt.Printf("  started:  %s\n", m.Started.Format(time.RFC3339))
@@ -592,18 +592,7 @@ func printDispatchManifest(m *dispatchManifest) {
 		fmt.Printf("  ⚠ step %d was routed to an AGENT but left the repo byte-identical.\n", n)
 		fmt.Printf("    Either it no-op'd (misroute) or it refused. Neither is visible from \"done\" — check the log.\n")
 	}
-	fmt.Printf("  log: %s\n", dispatchLogPath(mustAbsForLog(m), m.ID))
-}
-
-// mustAbsForLog is a tiny shim so printDispatchManifest can render the log path
-// without threading absRoot through; the runs dir is always <cwd>/.projx/runs at
-// the point status is read.
-func mustAbsForLog(_ *dispatchManifest) string {
-	wd, err := os.Getwd()
-	if err != nil {
-		return "."
-	}
-	return wd
+	fmt.Printf("  log: %s\n", dispatchLogPath(absRoot, m.ID))
 }
 
 func orDashDispatch(s string) string {

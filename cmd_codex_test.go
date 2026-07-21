@@ -22,6 +22,24 @@ func TestMergeCodexHooksAndProjectConfig(t *testing.T) {
 	if err != nil || len(added) != 0 || len(skipped) != len(codexHookSpecs) {
 		t.Fatalf("idempotent merge: added=%v skipped=%v err=%v", added, skipped, err)
 	}
+	data, err := os.ReadFile(hooksPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var hooksFile map[string]any
+	if err := json.Unmarshal(data, &hooksFile); err != nil {
+		t.Fatal(err)
+	}
+	hooks := hooksFile["hooks"].(map[string]any)
+	sessionGroups := hooks["SessionStart"].([]any)
+	sessionHooks := sessionGroups[0].(map[string]any)["hooks"].([]any)
+	if len(sessionHooks) != 2 {
+		t.Fatalf("SessionStart handlers = %d, want lifecycle + dashboard", len(sessionHooks))
+	}
+	dashboardCommand := sessionHooks[1].(map[string]any)["command"].(string)
+	if !strings.Contains(dashboardCommand, "status --ensure-server") {
+		t.Fatalf("dashboard command = %q", dashboardCommand)
+	}
 	configDir := filepath.Join(root, ".codex")
 	if err := os.MkdirAll(configDir, 0o755); err != nil {
 		t.Fatal(err)

@@ -169,6 +169,80 @@ func TestPreToolUseTargetBasedScope(t *testing.T) {
 	}
 }
 
+func TestCodexTargetsFloatAcrossProjects(t *testing.T) {
+	t.Setenv("PROJX_YOURS_DIR", t.TempDir())
+	root := t.TempDir()
+	repoA := filepath.Join(root, "repo-a")
+	repoB := filepath.Join(root, "repo-b")
+	for _, repo := range []string{repoA, repoB} {
+		if err := os.MkdirAll(repo, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		st := openStore(repo)
+		st.Close()
+	}
+
+	patchJSON := []byte(`{"session_id":"float","hook_event_name":"PreToolUse","tool_name":"functions.apply_patch","tool_input":{"patch":"*** Begin Patch\n*** Update File: ` + filepath.ToSlash(filepath.Join(repoA, "a.go")) + `\n*** Move to: ` + filepath.ToSlash(filepath.Join(repoB, "b.go")) + `\n*** End Patch"}}`)
+	var patchEvent hookEvent
+	if err := json.Unmarshal(patchJSON, &patchEvent); err != nil {
+		t.Fatal(err)
+	}
+	targets := hookTargetPaths(patchEvent)
+	if len(targets) != 2 {
+		t.Fatalf("patch targets = %q, want two", targets)
+	}
+	if got := lastTargetRoot(root, targets); got != repoB {
+		t.Fatalf("patch winner = %q, want %q", got, repoB)
+	}
+	if _, _, code := handleHook(root, patchJSON); code != 0 {
+		t.Fatalf("cross-project patch blocked: %d", code)
+	}
+
+	home := repoA
+	updateCrumb(home, "float", func(c *statusCrumb) { c.R = lastTargetRoot(root, targets) })
+	if got := activeContextRoot(home, "float", "continue"); got != repoB {
+		t.Fatalf("context did not float after patch: got %q want %q", got, repoB)
+	}
+
+	execJSON := []byte(`{"session_id":"float","hook_event_name":"PreToolUse","tool_name":"exec_command","tool_input":{"cmd":"Get-Content src/app.go","workdir":` + jsonStr(repoA) + `}}`)
+	var execEvent hookEvent
+	if err := json.Unmarshal(execJSON, &execEvent); err != nil {
+		t.Fatal(err)
+	}
+	execTargets := hookTargetPaths(execEvent)
+	if got := lastTargetRoot(root, execTargets); got != repoA {
+		t.Fatalf("exec winner = %q, want %q (targets %q)", got, repoA, execTargets)
+	}
+	updateCrumb(home, "float", func(c *statusCrumb) { c.R = lastTargetRoot(root, execTargets) })
+	if got := activeContextRoot(home, "float", "continue"); got != repoA {
+		t.Fatalf("context did not float back after exec_command: got %q want %q", got, repoA)
+	}
+}
+
+func TestCodexPatchChecksEveryProjectGate(t *testing.T) {
+	t.Setenv("PROJX_YOURS_DIR", t.TempDir())
+	root := t.TempDir()
+	repoA := filepath.Join(root, "repo-a")
+	repoB := filepath.Join(root, "repo-b")
+	for _, repo := range []string{repoA, repoB} {
+		if err := os.MkdirAll(repo, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a := openStore(repoA)
+	a.Close()
+	b := openStore(repoB)
+	if err := b.Put(store.Record{ID: "gate-rule/secret", Kind: store.KGateRule, Scope: store.ScopeProject, Key: "secret", Body: "secret/**"}); err != nil {
+		t.Fatal(err)
+	}
+	b.Close()
+	input := []byte(`{"hook_event_name":"PreToolUse","tool_name":"apply_patch","tool_input":{"input":"*** Begin Patch\n*** Update File: ` + filepath.ToSlash(filepath.Join(repoA, "ok.go")) + `\n*** Update File: ` + filepath.ToSlash(filepath.Join(repoB, "secret", "key.go")) + `\n*** End Patch"}}`)
+	_, errOut, code := handleHook(root, input)
+	if code != 2 || !strings.Contains(errOut, "off-limits") {
+		t.Fatalf("second project gate = code %d stderr %q", code, errOut)
+	}
+}
+
 // jsonStr quotes a filesystem path into a valid JSON string literal (escapes backslashes
 // so Windows paths round-trip through the hook payload).
 func jsonStr(s string) string {

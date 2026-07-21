@@ -22,6 +22,28 @@ Codex automatically. Its MCP server exposes deterministic pull tools.
    file when the fact belongs in ProjX.
 5. Use `route` when the user asks ProjX to choose the appropriate work tier.
 
+## Codex GUI status dashboard
+
+When the user asks to show, open, refresh, or inspect the ProjX dashboard in
+Codex:
+
+1. Call the `status_snapshot` MCP tool with the current project root and the
+   current session id when one is available.
+2. Render the returned structured snapshot as an inline Codex dashboard in the
+   current task. Keep active scope prominent and show record, gate, ADR, agent,
+   mode, verification, hook, MCP, store, and binary state.
+3. Include a refresh action that sends a follow-up asking Codex to call
+   `status_snapshot` again and update the dashboard. Include an inspect-scope
+   action that asks Codex to verify the breadcrumb and owning project.
+4. Tell the user to pin the task when they want the dashboard to remain in the
+   Codex sidebar. Do not claim that ProjX owns permanent Codex application
+   chrome; the supported GUI is the pinned interactive task.
+
+For a persistent dashboard without chat, run `projx-engine status --serve`. It
+opens a loopback-only browser dashboard that refreshes from the same snapshot.
+Use `--no-open` to print the URL without launching a browser. The terminal
+fallbacks are `--compact`, `--watch`, and `--json`.
+
 ## Setup
 
 Global setup is idempotent:
@@ -45,4 +67,3 @@ projx-engine --root <workspace> init --workspace
 Global setup installs Codex lifecycle hooks and this skill. Project setup
 registers the ProjX MCP server in `.codex/config.toml`, then seeds and indexes the
 project. Restart Codex after changing global hooks or MCP configuration.
-

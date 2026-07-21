@@ -98,6 +98,14 @@ func mcpTools() []map[string]any {
 	}
 	return []map[string]any{
 		{
+			"name":        "status_snapshot",
+			"description": "Return a presentation-neutral ProjX status snapshot: active scope, modes, health, gates, ADR freshness, and running agents.",
+			"inputSchema": obj(map[string]any{
+				"root":    mcpStr("optional repo root"),
+				"session": mcpStr("optional harness session id for floating scope"),
+			}),
+		},
+		{
 			"name":        "store_query",
 			"description": "Search this project's ProjX knowledge store — conventions, decisions, docs, and the code-map of symbols with file:line anchors. Returns matching records so you can jump to a symbol or read a declared rule instead of grepping.",
 			"inputSchema": obj(map[string]any{
@@ -168,11 +176,21 @@ func mcpToolCall(req mcpReq, defaultRoot string) mcpResp {
 		}}
 	}
 
-	st := openStore(root)
-	defer st.Close()
-
 	switch p.Name {
+	case "status_snapshot":
+		snapshot := buildStatusSnapshot(root, arg("session"))
+		b, err := json.MarshalIndent(snapshot, "", "  ")
+		if err != nil {
+			return text("snapshot failed: "+err.Error(), true)
+		}
+		return mcpResp{ID: req.ID, Result: map[string]any{
+			"content":           []map[string]any{{"type": "text", "text": string(b)}},
+			"structuredContent": snapshot,
+			"isError":           false,
+		}}
 	case "store_query":
+		st := openStore(root)
+		defer st.Close()
 		recs := mcpQuery(st, arg("query"))
 		if len(recs) == 0 {
 			return text("no matching records for: "+arg("query"), false)
@@ -187,9 +205,13 @@ func mcpToolCall(req mcpReq, defaultRoot string) mcpResp {
 		}
 		return text(b.String(), false)
 	case "route":
+		st := openStore(root)
+		defer st.Close()
 		d := store.RouteDecide(st, arg("task"), nil)
 		return text(fmt.Sprintf("tier: %s\ncmd: %s\nreason: %s", d.Class, d.Cmd, d.Reason), false)
 	case "impact":
+		st := openStore(root)
+		defer st.Close()
 		depth := 0
 		if d := arg("depth"); d != "" {
 			fmt.Sscanf(d, "%d", &depth)
@@ -208,12 +230,16 @@ func mcpToolCall(req mcpReq, defaultRoot string) mcpResp {
 		}
 		return text(b.String(), false)
 	case "gate_check":
+		st := openStore(root)
+		defer st.Close()
 		pat, denied := store.GateDenied(st, arg("path"))
 		if denied {
 			return text(fmt.Sprintf("DENIED — %q is off-limits by gate rule %q", arg("path"), pat), false)
 		}
 		return text(fmt.Sprintf("allowed — %q is not off-limits", arg("path")), false)
 	case "store_commit":
+		st := openStore(root)
+		defer st.Close()
 		kind, ok := mcpAgentKind(arg("kind"))
 		if !ok {
 			return text("kind must be one of: doc, convention, adr", true)

@@ -27,8 +27,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-
-	store "github.com/SirNiklas9/projx-store"
 )
 
 // absPathRe matches a Windows absolute path inside free text (e.g. a path named in a
@@ -127,68 +125,37 @@ func runStatuslineCmd(absRoot string, _ []string) {
 // buildStatusline is the print-free core: given a directory and session id it returns
 // the badge string. Kept pure so it can be unit-tested by feeding a temp dir.
 func buildStatusline(cwd, sid string) string {
-	// The crumb HOME is the session cwd's owning project (nearest ancestor with a
-	// .projx, cwd inclusive). Both this command and the hook derive it the same way
-	// from the same cwd, so they agree on where the breadcrumb lives.
-	home := nearestProjxDir(cwd)
+	return renderClaudeStatusline(buildStatusSnapshot(cwd, sid))
+}
 
-	var crumb statusCrumb
-	haveCrumb := false
-	if sid != "" && home != "" {
-		crumb, haveCrumb = readStatusCrumb(home, sid)
-	}
+// renderClaudeStatusline is deliberately kept as the Claude-specific presentation
+// layer. StatusSnapshot is shared with CLI/MCP consumers; this renderer retains the
+// established ANSI contract byte-for-byte.
+func renderClaudeStatusline(snapshot StatusSnapshot) string {
+	crumb := snapshot.crumb
+	haveCrumb := snapshot.haveCrumb
+	active := snapshot.ActiveRoot
 
-	// FLOATING scope: lead with the project being touched (crumb.R) when set and
-	// valid; otherwise the cwd's own project.
-	active := home
-	if haveCrumb && crumb.R != "" && isProjxDir(crumb.R) {
-		active = crumb.R
-	}
-
-	// Not inside any ProjX project → ProjX is present as a global floor only.
-	if active == "" || !isProjxDir(active) {
+	if active == "" || !snapshot.Project {
 		return slDim + "◇ projx " + slReset + slDim + "global floor" + slReset
 	}
-
-	st, err := openStoreSafe(active)
-	if err != nil {
-		// A project is here but its store won't open — still say so, don't go dark.
+	if snapshot.storeErr != "" {
 		return slAccent + "◆ projx " + slReset + slDim + filepath.Base(active) + " · store?" + slReset
 	}
-	defer st.Close()
 
 	var b strings.Builder
 	b.WriteString(slAccent + slBold + "◆ projx" + slReset)
-	b.WriteString(" " + slBold + filepath.Base(active) + slReset)
-
-	// knowledge-record count (project scope, EXCLUDING the code map) — the code map
-	// can be thousands of symbol records and would drown out the signal the human
-	// actually reads: how much declared knowledge this project carries.
-	n := 0
-	for _, r := range st.List(store.InScope(store.ScopeProject)) {
-		if r.Kind != store.KDeclaredStructure {
-			n++
-		}
-	}
-	b.WriteString(" " + slDim + itoa(n) + " rec" + slReset)
-
-	// mode flags — only shown when notable, so a quiet project stays quiet. These
-	// reflect the ACTIVE (touched) project's rules, which is the floating point:
-	// jump into a repo with dispatcher-mode on and the badge shows it.
-	if store.DispatcherModeOn(st) {
+	b.WriteString(" " + slBold + snapshot.ProjectName + slReset)
+	b.WriteString(" " + slDim + itoa(snapshot.RecordCount) + " rec" + slReset)
+	if snapshot.Modes.Dispatcher {
 		b.WriteString(" " + slAmber + "disp✋" + slReset)
 	}
-	if store.CageModeOn(st) {
+	if snapshot.Modes.Cage {
 		b.WriteString(" " + slRed + "cage" + slReset)
 	}
-	if store.OverrideAuthorityOn(st) {
+	if snapshot.Modes.OverrideAuthority {
 		b.WriteString(" " + slGreen + "override✓" + slReset)
 	}
-
-	// in-the-moment activity: the last thing ProjX did this session, left as a
-	// breadcrumb by the hook. Makes ProjX activity visible turn-to-turn, distinct
-	// from plain harness work — a block flips the badge red, a context inject shows
-	// how much was slid in.
 	if haveCrumb {
 		switch crumb.A {
 		case "gate":
@@ -199,25 +166,13 @@ func buildStatusline(cwd, sid string) string {
 			}
 		}
 	}
-
-	// Background-dispatch badge: when `dispatch --run` has detached runs for this
-	// project, show a compact count (⚙ N running · M done) so Nick sees background
-	// work without polling `dispatch status`.
 	if db := dispatchBadge(active); db != "" {
 		b.WriteString(" " + db)
 	}
-
-	// Multi-agent live view (Step 1+2 of the statusline-multiagent plan): one line per
-	// RUNNING background agent, across ALL projects. The badge above is the header; each
-	// running dispatch/workflow adds a line below it (Claude Code paints multi-line
-	// stdout). Exactly one agent renders FAT — chosen by the focus pin, else the agent in
-	// the current scope, else the sole agent — and the rest render lean. Purely additive:
-	// with nothing dispatched this returns "" and the status line stays a single badge.
 	if lines := agentLines(active, readFocus()); lines != "" {
 		b.WriteString("\n")
 		b.WriteString(lines)
 	}
-
 	return b.String()
 }
 

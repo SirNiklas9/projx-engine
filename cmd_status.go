@@ -14,12 +14,17 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
-	store "github.com/SirNiklas9/projx-store"
 	"github.com/SirNiklas9/projx-engine/internal/secrets"
+	store "github.com/SirNiklas9/projx-store"
 )
 
-func runStatusCmd(absRoot string, _ []string) {
+func runStatusCmd(absRoot string, args []string) {
+	if statusDashboardRequested(args) {
+		runStatusDashboard(absRoot, args)
+		return
+	}
 	// ── version ──────────────────────────────────────────────────────────────
 	if v := resolveVersion(); v != "" {
 		fmt.Printf("projx-engine v%s\n", v)
@@ -104,6 +109,73 @@ func runStatusCmd(absRoot string, _ []string) {
 		fmt.Printf("  off-limits gates:   %s\n", strings.Join(pats, ", "))
 	}
 	fmt.Printf("  code-map:           %d symbol(s)\n", len(st.List(store.OfKind(store.KDeclaredStructure))))
+}
+
+func statusDashboardRequested(args []string) bool {
+	for _, a := range args {
+		if a == "--json" || a == "--compact" || a == "--watch" || a == "--human" || a == "--serve" || a == "--ensure-server" || a == "--show-server" {
+			return true
+		}
+	}
+	return false
+}
+
+func runStatusDashboard(absRoot string, args []string) {
+	for _, arg := range args {
+		if arg == "--ensure-server" || arg == "--show-server" {
+			if err := ensureStatusServer(absRoot, args, arg == "--show-server"); err != nil {
+				die("status %s: %v", arg, err)
+			}
+			return
+		}
+		if arg == "--serve" {
+			runStatusServe(absRoot, args)
+			return
+		}
+	}
+	jsonOut, compact, watch := false, false, false
+	sid := ""
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--json":
+			jsonOut = true
+		case "--compact":
+			compact = true
+		case "--watch":
+			watch = true
+		case "--session":
+			if i+1 < len(args) {
+				i++
+				sid = args[i]
+			}
+		}
+	}
+	for {
+		s := buildStatusSnapshot(absRoot, sid)
+		if jsonOut {
+			b, _ := json.MarshalIndent(s, "", "  ")
+			fmt.Println(string(b))
+		} else if compact {
+			fmt.Println(renderStatusCompact(s))
+		} else {
+			fmt.Println(renderStatusCompact(s))
+			fmt.Printf("  scope: %s\n  health: store=%t mcp=%t hooks=%t binary=%t stale=%t\n  knowledge: %d ADRs (newest %s)\n", s.ActiveRoot, s.Health.Store, s.Health.MCP, s.Health.Hooks, s.Health.Binary, s.Health.BinaryStale, s.ADRCount, statusTime(s.NewestADR))
+			for _, a := range s.Agents {
+				fmt.Printf("  agent: %s %s (%d/%d) %s\n", a.Project, a.Operation, a.Step, a.Total, a.State)
+			}
+		}
+		if !watch {
+			return
+		}
+		time.Sleep(time.Second)
+	}
+}
+
+func statusTime(t int64) string {
+	if t == 0 {
+		return "n/a"
+	}
+	return time.UnixMilli(t).Format(time.RFC3339)
 }
 
 // globalHookStatus reports how many of ProjX's lifecycle events have the hook installed.

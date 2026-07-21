@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ProjX Status</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f6f7fb;
+      --surface: #ffffff;
+      --surface-soft: #eef1f8;
+      --text: #161923;
+      --muted: #626979;
+      --border: #dfe3ec;
+      --accent: #4169e1;
+      --accent-soft: #e8edff;
+      --ok: #24835b;
+      --warn: #a56616;
+      --bad: #b83c48;
+      --shadow: 0 12px 36px rgba(24, 31, 52, .08);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #11131a;
+        --surface: #191c25;
+        --surface-soft: #222633;
+        --text: #f0f2f8;
+        --muted: #aeb5c5;
+        --border: #303646;
+        --accent: #8aa4ff;
+        --accent-soft: #252f55;
+        --ok: #65c89c;
+        --warn: #e8b363;
+        --bad: #f17f89;
+        --shadow: 0 16px 42px rgba(0, 0, 0, .28);
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    main { width: min(1060px, calc(100% - 32px)); margin: 32px auto; display: grid; gap: 18px; }
+    header { display: flex; justify-content: space-between; align-items: flex-start; gap: 18px; flex-wrap: wrap; }
+    h1 { margin: 0; font-size: clamp(1.4rem, 3vw, 2rem); font-weight: 650; letter-spacing: -.03em; }
+    h2 { margin: 0; font-size: .84rem; font-weight: 650; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+    p { margin: 0; }
+    code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; overflow-wrap: anywhere; }
+    .brand { display: flex; gap: 12px; align-items: center; }
+    .mark { width: 34px; height: 34px; display: grid; place-items: center; color: var(--accent); background: var(--accent-soft); border-radius: 10px; font-size: 1.2rem; }
+    .scope { margin-top: 5px; color: var(--muted); }
+    .live { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: .88rem; }
+    .pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 4px color-mix(in srgb, var(--ok) 16%, transparent); }
+    .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; box-shadow: var(--shadow); }
+    .metric { padding: 18px; display: grid; gap: 4px; }
+    .metric-label { color: var(--muted); font-size: .82rem; }
+    .metric-value { font-size: clamp(1.8rem, 5vw, 2.65rem); font-weight: 650; letter-spacing: -.05em; }
+    .metric-detail { color: var(--muted); font-size: .82rem; }
+    .panel { padding: 20px; display: grid; gap: 16px; }
+    .health { display: flex; gap: 9px; flex-wrap: wrap; }
+    .chip { display: inline-flex; gap: 7px; align-items: center; padding: 7px 10px; background: var(--surface-soft); border-radius: 999px; font-size: .82rem; }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+    .dot.ok { background: var(--ok); }
+    .dot.warn { background: var(--warn); }
+    .dot.bad { background: var(--bad); }
+    .facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; overflow: hidden; border: 1px solid var(--border); border-radius: 12px; background: var(--border); }
+    .fact { padding: 13px; background: var(--surface); display: grid; gap: 4px; min-width: 0; }
+    .fact span { color: var(--muted); font-size: .76rem; }
+    .fact strong { font-size: .9rem; font-weight: 600; overflow-wrap: anywhere; }
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: .86rem; }
+    th, td { padding: 11px 8px; text-align: left; border-bottom: 1px solid var(--border); }
+    th { color: var(--muted); font-weight: 550; }
+    tbody tr:last-child td { border-bottom: 0; }
+    .empty { padding: 18px 0 4px; color: var(--muted); text-align: center; }
+    .error { color: var(--bad); }
+    footer { color: var(--muted); font-size: .78rem; display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+    @media (max-width: 700px) {
+      main { width: min(100% - 20px, 1060px); margin: 18px auto; }
+      .grid { grid-template-columns: 1fr; }
+      .facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (prefers-reduced-motion: no-preference) {
+      .pulse { animation: breathe 2s ease-in-out infinite; }
+      @keyframes breathe { 50% { box-shadow: 0 0 0 7px color-mix(in srgb, var(--ok) 8%, transparent); } }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div class="brand">
+        <div class="mark" aria-hidden="true">◆</div>
+        <div>
+          <h1>ProjX status</h1>
+          <p class="scope"><strong id="project">Connecting…</strong> <code id="root"></code></p>
+        </div>
+      </div>
+      <div class="live"><span class="pulse" aria-hidden="true"></span><span id="live-label">Connecting</span></div>
+    </header>
+
+    <section class="grid" aria-label="Knowledge metrics">
+      <article class="card metric"><span class="metric-label">Declared knowledge</span><strong class="metric-value" id="records">–</strong><span class="metric-detail">project records</span></article>
+      <article class="card metric"><span class="metric-label">Architecture</span><strong class="metric-value" id="adrs">–</strong><span class="metric-detail" id="adr-detail">ADRs</span></article>
+      <article class="card metric"><span class="metric-label">Protection</span><strong class="metric-value" id="gates">–</strong><span class="metric-detail">active gate rules</span></article>
+    </section>
+
+    <section class="card panel" aria-labelledby="health-heading">
+      <h2 id="health-heading">Integration health</h2>
+      <div class="health" id="health"></div>
+      <div class="facts">
+        <div class="fact"><span>Active mode</span><strong id="modes">–</strong></div>
+        <div class="fact"><span>Last action</span><strong id="action">–</strong></div>
+        <div class="fact"><span>Context injected</span><strong id="context">–</strong></div>
+        <div class="fact"><span>Verification</span><strong id="verification">–</strong></div>
+      </div>
+    </section>
+
+    <section class="card panel" aria-labelledby="agents-heading">
+      <h2 id="agents-heading">Running agents</h2>
+      <div class="table-wrap" id="agent-table"></div>
+    </section>
+
+    <footer><span id="updated">Waiting for first snapshot</span><span>Auto-refreshes every 1.5 seconds</span></footer>
+  </main>
+  <script>
+    const byId = id => document.getElementById(id);
+    const text = (id, value) => { byId(id).textContent = value; };
+    const healthNames = {
+      store: 'Store',
+      mcp: 'MCP configured',
+      mcp_current: 'MCP binary parity',
+      hooks: 'Hooks configured',
+      hooks_current: 'Hook binary parity',
+      binary: 'Running binary',
+      binary_stale: 'Source freshness'
+    };
+
+    function bytes(n) {
+      if (!n) return 'none';
+      if (n < 1024) return `${n} B`;
+      return `${(n / 1024).toFixed(1)} kB`;
+    }
+
+    function renderHealth(health) {
+      const el = byId('health');
+      el.replaceChildren();
+      Object.entries(healthNames).forEach(([key, label]) => {
+        const value = health[key];
+        const healthy = key === 'binary_stale' ? !value : value;
+        const chip = document.createElement('span');
+        chip.className = 'chip';
+        const dot = document.createElement('span');
+        dot.className = `dot ${healthy ? 'ok' : key === 'binary' ? 'warn' : 'bad'}`;
+        dot.setAttribute('aria-hidden', 'true');
+        chip.append(dot, document.createTextNode(label));
+        chip.setAttribute('aria-label', `${label}: ${healthy ? 'healthy' : 'attention needed'}`);
+        el.append(chip);
+      });
+    }
+
+    function renderAgents(agents) {
+      const wrap = byId('agent-table');
+      wrap.replaceChildren();
+      if (!agents.length) {
+        const empty = document.createElement('p');
+        empty.className = 'empty';
+        empty.textContent = 'No background agents are running.';
+        wrap.append(empty);
+        return;
+      }
+      const table = document.createElement('table');
+      table.innerHTML = '<thead><tr><th>Project</th><th>Operation</th><th>Progress</th><th>State</th><th>Verification</th></tr></thead>';
+      const body = document.createElement('tbody');
+      agents.forEach(agent => {
+        const row = document.createElement('tr');
+        [agent.project, agent.operation, `${agent.step}/${agent.total}`, agent.state, agent.verify || 'not run'].forEach(value => {
+          const cell = document.createElement('td');
+          cell.textContent = value;
+          row.append(cell);
+        });
+        body.append(row);
+      });
+      table.append(body);
+      wrap.append(table);
+    }
+
+    function render(snapshot) {
+      text('project', snapshot.project_name || 'Global floor');
+      text('root', snapshot.active_root || '');
+      text('records', snapshot.record_count);
+      text('adrs', snapshot.adr_count);
+      text('gates', snapshot.gate_count);
+      text('adr-detail', snapshot.adr_fresh ? `ADRs · fresh · ${snapshot.adr_age_days || 0}d` : `ADRs · review due · ${snapshot.adr_age_days || 0}d`);
+      const modes = Object.entries(snapshot.modes).filter(([, on]) => on).map(([name]) => name.replaceAll('_', ' '));
+      text('modes', modes.length ? modes.join(', ') : 'normal');
+      text('action', snapshot.last_action || 'none');
+      text('context', bytes(snapshot.context_bytes));
+      text('verification', snapshot.verification || 'not run');
+      renderHealth(snapshot.health);
+      renderAgents(snapshot.agents || []);
+      const updated = new Date(snapshot.generated_at);
+      text('updated', `Updated ${updated.toLocaleTimeString()}`);
+      text('live-label', 'Live');
+      byId('live-label').classList.remove('error');
+    }
+
+    async function refresh() {
+      try {
+        const response = await fetch('/api/status', { cache: 'no-store' });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        render(await response.json());
+      } catch (error) {
+        text('live-label', 'Disconnected');
+        byId('live-label').classList.add('error');
+      }
+    }
+
+    refresh();
+    setInterval(() => { if (!document.hidden) refresh(); }, 1500);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+  </script>
+</body>
+</html>

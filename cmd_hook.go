@@ -38,27 +38,112 @@ type hookEvent struct {
 	ToolName  string `json:"tool_name"` // PreToolUse — which tool (Edit/Write/Read/…)
 	ToolInput struct {
 		FilePath string `json:"file_path"` // PreToolUse (Read/Edit/Write)
-		Command  string `json:"command"`   // PreToolUse (Bash) — the shell command line
+		Cmd      string `json:"cmd"`
+		Patch    string `json:"patch"`
+		Input    string `json:"input"`
+		Workdir  string `json:"workdir"`
+		Command  string `json:"command"` // PreToolUse (Bash) — the shell command line
 	} `json:"tool_input"`
 }
 
 func isMutatingHookTool(name string) bool {
-	return store.IsMutatingTool(name) || strings.EqualFold(strings.TrimSpace(name), "apply_patch")
+	n := normalizedHookTool(name)
+	return store.IsMutatingTool(name) || n == "apply_patch" || n == "exec_command"
+}
+
+func normalizedHookTool(name string) string {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if i := strings.LastIndexAny(name, ".:/"); i >= 0 {
+		name = name[i+1:]
+	}
+	switch name {
+	case "bash", "shell", "exec", "exec_command":
+		return "exec_command"
+	case "applypatch", "apply_patch":
+		return "apply_patch"
+	default:
+		return name
+	}
 }
 
 func hookTargetPaths(ev hookEvent) []string {
-	if !strings.EqualFold(strings.TrimSpace(ev.ToolName), "apply_patch") {
-		return nil
-	}
 	var out []string
-	for _, line := range strings.Split(ev.ToolInput.Command, "\n") {
-		line = strings.TrimSpace(line)
-		for _, prefix := range []string{"*** Add File:", "*** Update File:", "*** Delete File:", "*** Move to:"} {
-			if strings.HasPrefix(line, prefix) {
-				if p := strings.TrimSpace(strings.TrimPrefix(line, prefix)); p != "" {
-					out = append(out, p)
+	if p := strings.TrimSpace(ev.ToolInput.FilePath); p != "" {
+		out = append(out, p)
+	}
+	switch normalizedHookTool(ev.ToolName) {
+	case "apply_patch":
+		patch := firstHookValue(ev.ToolInput.Patch, ev.ToolInput.Input, ev.ToolInput.Command, ev.ToolInput.Cmd)
+		for _, line := range strings.Split(patch, "\n") {
+			line = strings.TrimSpace(line)
+			for _, prefix := range []string{"*** Add File:", "*** Update File:", "*** Delete File:", "*** Move to:"} {
+				if strings.HasPrefix(line, prefix) {
+					if p := strings.TrimSpace(strings.TrimPrefix(line, prefix)); p != "" {
+						out = append(out, resolveHookPath(ev, p))
+					}
 				}
 			}
+		}
+	case "exec_command":
+		out = append(out, execCommandTargetPaths(ev, firstHookValue(ev.ToolInput.Cmd, ev.ToolInput.Command))...)
+		if ev.ToolInput.Workdir != "" {
+			out = append(out, filepath.Join(ev.ToolInput.Workdir, "_"))
+		}
+	}
+	return uniqueHookPaths(out)
+}
+
+func firstHookValue(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+func resolveHookPath(ev hookEvent, p string) string {
+	p = strings.TrimSpace(p)
+	if p == "" || filepath.IsAbs(p) || ev.ToolInput.Workdir == "" {
+		return p
+	}
+	return filepath.Join(ev.ToolInput.Workdir, p)
+}
+
+func execCommandTargetPaths(ev hookEvent, cmd string) []string {
+	supported := map[string]bool{"cat": true, "type": true, "get-content": true, "rg": true, "grep": true, "touch": true, "mkdir": true, "new-item": true, "rm": true, "remove-item": true, "cp": true, "copy-item": true, "mv": true, "move-item": true, "set-content": true, "add-content": true, "sed": true}
+	var out []string
+	fields := bashSplit(cmd)
+	for i := 0; i < len(fields); {
+		op := strings.ToLower(filepath.Base(fields[i]))
+		if !supported[op] {
+			i++
+			continue
+		}
+		i++
+		for i < len(fields) {
+			tok := strings.TrimSpace(fields[i])
+			low := strings.ToLower(tok)
+			if supported[low] {
+				break
+			}
+			i++
+			if tok == "" || strings.HasPrefix(tok, "-") || strings.HasPrefix(tok, "$") || strings.Contains(tok, "*") {
+				continue
+			}
+			out = append(out, resolveHookPath(ev, tok))
+		}
+	}
+	return out
+}
+
+func uniqueHookPaths(in []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		if s = strings.TrimSpace(s); s != "" && !seen[s] {
+			seen[s] = true
+			out = append(out, s)
 		}
 	}
 	return out
@@ -84,26 +169,21 @@ func runHookCmd(absRoot string, _ []string) {
 		// agent edits/reads, not the static cwd). The crumb lives in the session cwd's
 		// project so the statusline command, deriving the same home, finds it.
 		home := targetStoreRoot(root, filepath.Join(root, "_"))
-		var meta struct {
-			SessionID string `json:"session_id"`
-			Event     string `json:"hook_event_name"`
-			ToolInput struct {
-				FilePath string `json:"file_path"`
-			} `json:"tool_input"`
-		}
+		var meta hookEvent
 		if json.Unmarshal(data, &meta) == nil && meta.SessionID != "" {
+			targets := hookTargetPaths(meta)
 			switch {
 			case meta.Event == "PreToolUse" && code == 2:
 				// A block — float the badge to the blocked area (if it's a project) so the
 				// human sees WHERE the wall is, at a glance, alongside the red marker.
-				if tr := targetStoreRoot(root, meta.ToolInput.FilePath); meta.ToolInput.FilePath != "" && isProjxDir(tr) {
+				if tr := lastTargetRoot(root, targets); tr != "" {
 					updateCrumb(home, meta.SessionID, func(c *statusCrumb) { c.A = "gate"; c.R = tr })
 				} else {
 					updateCrumb(home, meta.SessionID, func(c *statusCrumb) { c.A = "gate" })
 				}
-			case meta.Event == "PreToolUse" && meta.ToolInput.FilePath != "":
+			case meta.Event == "PreToolUse" && len(targets) > 0:
 				// A file was touched (allowed) → float the scope to its owning project.
-				if tr := targetStoreRoot(root, meta.ToolInput.FilePath); isProjxDir(tr) {
+				if tr := lastTargetRoot(root, targets); tr != "" {
 					updateCrumb(home, meta.SessionID, func(c *statusCrumb) { c.R = tr })
 				}
 			case meta.Event == "SessionStart":
@@ -123,6 +203,15 @@ func runHookCmd(absRoot string, _ []string) {
 		fmt.Fprintln(os.Stderr, stderr)
 	}
 	os.Exit(code)
+}
+
+func lastTargetRoot(absRoot string, targets []string) string {
+	for i := len(targets) - 1; i >= 0; i-- {
+		if tr := targetStoreRoot(absRoot, targets[i]); isProjxDir(tr) {
+			return tr
+		}
+	}
+	return ""
 }
 
 // hookRoot resolves the project root for a hook invocation WITHOUT needing the command
@@ -151,6 +240,7 @@ func hookRoot(absRoot string, data []byte) string {
 func handleHook(absRoot string, input []byte) (stdout, stderr string, code int) {
 	var ev hookEvent
 	_ = json.Unmarshal(input, &ev) // tolerate partial/garbage: empty event → no-op
+	ev.ToolInput.Command = firstHookValue(ev.ToolInput.Command, ev.ToolInput.Cmd)
 	sid := ev.SessionID
 	if sid == "" {
 		sid = "default"
@@ -205,8 +295,11 @@ func handleHook(absRoot string, input []byte) (stdout, stderr string, code int) 
 		return "", "", 0
 
 	case "PreToolUse":
-		path := ev.ToolInput.FilePath
 		targets := hookTargetPaths(ev)
+		path := ev.ToolInput.FilePath
+		if path == "" && len(targets) > 0 {
+			path = targets[0]
+		}
 		// TARGET-based scope (adr/scope-resolution-is-target-based): the rules that apply
 		// are the ones of the project CONTAINING the file being touched, not the process
 		// cwd. Walk up from the target path to its owning .projx; fall back to cwd only
@@ -295,7 +388,11 @@ func handleHook(absRoot string, input []byte) (stdout, stderr string, code int) 
 		}
 		// Auto-focus: touching a member repo's file focuses the session there, so the
 		// next turn's slice leads with that repo — and it SHIFTS when you edit another.
-		if repo := repoOfPath(absRoot, path); repo != "" {
+		focusPath := path
+		if len(targets) > 0 {
+			focusPath = targets[len(targets)-1]
+		}
+		if repo := repoOfPath(absRoot, focusPath); repo != "" {
 			cps := osCheckpoints{absRoot}
 			if cp := cps.Load(sid); cp.Focus != repo {
 				cp.Focus = repo

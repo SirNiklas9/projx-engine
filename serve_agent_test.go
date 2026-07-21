@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"testing"
 	"time"
 
@@ -21,7 +22,11 @@ func TestAgentRunUncaged(t *testing.T) {
 	ts := httptest.NewServer(srv.routes())
 	defer ts.Close()
 
-	t.Setenv("PROJX_AGENT_CMD", "true") // trivial agent: exits 0, ignores args
+	noopAgent := "true"
+	if runtime.GOOS == "windows" {
+		noopAgent = "cmd /c exit 0"
+	}
+	t.Setenv("PROJX_AGENT_CMD", noopAgent) // trivial agent: exits 0, ignores args
 
 	body, _ := json.Marshal(map[string]any{"task": "noop", "caged": false})
 	resp, err := http.Post(ts.URL+"/api/agent/run", "application/json", bytes.NewReader(body))
