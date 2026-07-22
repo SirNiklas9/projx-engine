@@ -294,7 +294,7 @@ func handleHook(absRoot string, input []byte) (stdout, stderr string, code int) 
 		root := activeContextRoot(absRoot, sid, ev.Prompt)
 		ctx := reconciliationPrompt(root) + buildSessionContext(root, sid, ev.Prompt, false)
 		markGovernedRecall(absRoot, sid, ev.Prompt)
-		ctx = pendingLearnNotice(absRoot, sid) + ctx
+		ctx = pendingLearnNotice(root, sid) + ctx
 		// NEXT-PROMPT SURFACE: any detached dispatch that finished but hasn't been
 		// reported gets a concise summary prepended here (and flipped Reported=true), so
 		// the background result reaches Nick on his next turn without polling.

@@ -148,6 +148,20 @@ func stageLearnCandidate(root, session string, turn governedTurn) bool {
 	return st.Put(record) == nil
 }
 
+// learnPathsForRoot keeps a project's LEARN evidence scoped to files owned by
+// that project. A governed turn may span several repositories, but each
+// project's candidate must remain independently reviewable and must not leak
+// another project's paths into its store.
+func learnPathsForRoot(home, root string, paths []string) []string {
+	var owned []string
+	for _, path := range paths {
+		if normRoot(targetStoreRoot(home, path)) == normRoot(root) {
+			owned = append(owned, path)
+		}
+	}
+	return uniqueSortedStrings(owned)
+}
+
 // closeGovernedTurn automatically verifies every project touched by a mutation.
 // Passing verification stages evidence for later AI classification; it never
 // writes an authoritative store record by itself.
@@ -161,8 +175,13 @@ func closeGovernedTurn(home, session string) (string, bool) {
 			return "ProjX governed turn: verification failed; the turn remains open. Repair the change and stop again to re-verify.", true
 		}
 	}
-	if !stageLearnCandidate(home, session, turn) {
-		return "ProjX governed turn: verification passed, but the learn candidate could not be staged; failing closed.", true
+	for _, root := range turn.MutatedRoots {
+		projectTurn := turn
+		projectTurn.MutatedRoots = []string{root}
+		projectTurn.MutatedPaths = learnPathsForRoot(home, root, turn.MutatedPaths)
+		if !stageLearnCandidate(root, session, projectTurn) {
+			return "ProjX governed turn: verification passed, but the learn candidate could not be staged; failing closed.", true
+		}
 	}
 	turn.MutatedRoots = nil
 	turn.MutatedPaths = nil

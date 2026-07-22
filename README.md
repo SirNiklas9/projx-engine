@@ -166,8 +166,9 @@ one-shot agent binary you already run). Nothing in ProjX's logic is vendor-speci
   tool call whose target path or shell command reaches off-limits data
   (`secret/**`, `.env*`, keys) — enforced, not advised.
 - **PreCompact** → mark the floor lost so the next turn refills after compaction.
-- **Stop** → **suggest-only**: if you said `@remember` and nothing was committed, nudge
-  once (never nags).
+- **Stop** → after mutations, verify every touched project and stage reviewable LEARN
+  candidates in their owning project stores; authoritative knowledge still requires
+  reconciliation. If you said `@remember` and nothing was committed, nudge once.
 
 Many Claude Code sessions can share one store while each keeps its own delta cursor and
 focus — shared knowledge, independent per-session state.

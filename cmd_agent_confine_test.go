@@ -28,8 +28,8 @@ import (
 )
 
 // confinedFakeAgentSource is the fake agent that:
-//   1. Reads a file OUTSIDE the root (path from env PROJX_OUTSIDE_PATH).
-//   2. Writes "OUTSIDE:OK" or "OUTSIDE:DENIED" to <root>/agentresult.txt.
+//  1. Reads a file OUTSIDE the root (path from env PROJX_OUTSIDE_PATH).
+//  2. Writes "OUTSIDE:OK" or "OUTSIDE:DENIED" to <root>/agentresult.txt.
 //
 // The result file is INSIDE the root so the parent can read it. Stdout is
 // also written for debugging.

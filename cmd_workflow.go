@@ -213,6 +213,13 @@ func runWorkflowCmd(absRoot string, args []string) {
 		die("workflow: %v", err)
 	}
 	for _, batch := range batches {
+		var before workflowTreeSnapshot
+		if m.Parallel {
+			before, err = captureWorkflowTree(absRoot)
+			if err != nil {
+				die("workflow: cannot establish parallel mutation baseline: %v", err)
+			}
+		}
 		errs := make([]error, len(batch))
 		var wg sync.WaitGroup
 		for bi, i := range batch {
@@ -221,10 +228,23 @@ func runWorkflowCmd(absRoot string, args []string) {
 			wg.Add(1)
 			go func(pos int, s WorkflowStep, d routing.Decision) {
 				defer wg.Done()
-				errs[pos] = runWorkflowChild(self, absRoot, s, d)
+				errs[pos] = runWorkflowChild(self, absRoot, s, d, m.Parallel)
 			}(bi, s, d)
 		}
 		wg.Wait()
+		if m.Parallel {
+			after, snapErr := captureWorkflowTree(absRoot)
+			if snapErr != nil {
+				die("workflow: cannot verify parallel mutations: %v", snapErr)
+			}
+			steps := make([]WorkflowStep, 0, len(batch))
+			for _, i := range batch {
+				steps = append(steps, m.Steps[i])
+			}
+			if mutationErr := workflowChangedPathsAllowed(changedWorkflowPaths(before, after), steps); mutationErr != nil {
+				die("workflow: parallel write-set violation: %v", mutationErr)
+			}
+		}
 		for bi, i := range batch {
 			s := m.Steps[i]
 			if errs[bi] != nil {
@@ -243,7 +263,7 @@ func runWorkflowCmd(absRoot string, args []string) {
 	fmt.Printf("\nworkflow %s: DONE — %d/%d steps completed\n", workflowName(m), len(m.Steps), len(m.Steps))
 }
 
-func runWorkflowChild(self, absRoot string, s WorkflowStep, d routing.Decision) error {
+func runWorkflowChild(self, absRoot string, s WorkflowStep, d routing.Decision, parallel bool) error {
 	if d.Kind == "deterministic" {
 		return runDispatchChild(self, absRoot, deterministicStepArgs(d.Op), "", nil)
 	}
@@ -251,8 +271,16 @@ func runWorkflowChild(self, absRoot string, s WorkflowStep, d routing.Decision) 
 	if role == "" {
 		role = workerRoleForStep(dispatchStepStat{Tier: d.Class, Kind: d.Kind, Op: d.Op})
 	}
-	env := []string{"PROJX_WORKER_ROLE=" + role, parallelWorkerEnv + "=1", "PROJX_WORKER_WRITES=" + strings.Join(s.Writes, string(os.PathListSeparator))}
+	env := workflowChildEnv(s, role, parallel)
 	return runDispatchChild(self, absRoot, []string{"agent", "run", "--task", s.Task, "--", s.Task}, d.ProviderCmd, env)
+}
+
+func workflowChildEnv(s WorkflowStep, role string, parallel bool) []string {
+	env := []string{"PROJX_WORKER_ROLE=" + role}
+	if parallel {
+		env = append(env, parallelWorkerEnv+"=1", "PROJX_WORKER_WRITES="+strings.Join(s.Writes, string(os.PathListSeparator)))
+	}
+	return env
 }
 
 func printWorkflowPlan(m *WorkflowManifest, decisions []routing.Decision) {
@@ -563,6 +591,12 @@ func runParallelWorkflowSupervise(absRoot, id, self string, m *dispatchManifest)
 		if failed {
 			break
 		}
+		before, snapErr := captureWorkflowTree(absRoot)
+		if snapErr != nil {
+			fmt.Printf("workflow %s: cannot establish parallel mutation baseline: %v\n", id, snapErr)
+			failed = true
+			break
+		}
 		errs := make([]error, len(batch))
 		var wg sync.WaitGroup
 		for bi, i := range batch {
@@ -576,12 +610,33 @@ func runParallelWorkflowSupervise(absRoot, id, self string, m *dispatchManifest)
 		}
 		_ = writeDispatchManifest(absRoot, m)
 		wg.Wait()
+		mutationViolation := false
+		after, snapErr := captureWorkflowTree(absRoot)
+		if snapErr != nil {
+			fmt.Printf("workflow %s: cannot verify parallel mutations: %v\n", id, snapErr)
+			failed = true
+			mutationViolation = true
+		} else {
+			steps := make([]WorkflowStep, 0, len(batch))
+			for _, i := range batch {
+				steps = append(steps, plan.Steps[i])
+			}
+			if mutationErr := workflowChangedPathsAllowed(changedWorkflowPaths(before, after), steps); mutationErr != nil {
+				fmt.Printf("workflow %s: parallel write-set violation: %v\n", id, mutationErr)
+				failed = true
+				mutationViolation = true
+			}
+		}
 		for bi, i := range batch {
 			st := &m.Steps[i]
 			if errs[bi] != nil {
 				st.State = "failed"
 				failed = true
 				fmt.Printf("workflow %s: step %q failed: %v\n", id, st.ID, errs[bi])
+				continue
+			}
+			if mutationViolation {
+				st.State = "failed"
 				continue
 			}
 			if st.Gate != "" {
@@ -631,12 +686,10 @@ func runDetachedParallelChild(self, absRoot string, st dispatchStepStat) error {
 }
 
 // DELIBERATELY DEFERRED — held for Nick to direct the shape (see adr/workflow-dictation-
-// layer). SHAPE #1 (detach) and #2 (selectable gate) are now IMPLEMENTED above; these
-// four remain open and were NOT touched this pass:
+// layer). SHAPE #1 (detach), #2 (selectable gate), and #4 (dependency-aware parallel
+// waves with declared write sets) are IMPLEMENTED above; these three remain open:
 //   3. NO PER-STEP REPAIR — a failed gate STOPS; it does not verify-loop-repair the step.
 //      Open: fold VerifyLoop in so a gated step self-repairs up to N iters before failing.
-//   4. deps VALIDATE ordering but do NOT enable PARALLELISM — independent steps run serially.
-//      Open: run dep-independent steps concurrently (true graph, not just sequence).
 //   5. tier override HARD-SETS the class; it does not re-run store pin/floor/risk-floor.
 //      Open: should a manifest tier be a floor (minimum) rather than a hard pin?
 //   6. No workflow manifest is persisted to the store (it lives as a file).

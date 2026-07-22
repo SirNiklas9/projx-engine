@@ -102,3 +102,68 @@ func TestWorkflowChangedPathsAllowedRejectsUndeclared(t *testing.T) {
 		t.Fatal("expected undeclared mutation error")
 	}
 }
+
+func TestSequentialWorkflowChildHasNoParallelLease(t *testing.T) {
+	env := workflowChildEnv(WorkflowStep{ID: "serial"}, "implementation", false)
+	joined := strings.Join(env, "\n")
+	if strings.Contains(joined, parallelWorkerEnv+"=") || strings.Contains(joined, "PROJX_WORKER_WRITES=") {
+		t.Fatalf("sequential child unexpectedly received parallel lease: %v", env)
+	}
+	if !strings.Contains(joined, "PROJX_WORKER_ROLE=implementation") {
+		t.Fatalf("worker role missing: %v", env)
+	}
+}
+
+func TestParallelWorkflowMutationBackstopDetectsUndeclaredFile(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "internal", "a"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "internal", "a", "owned.go"), []byte("before"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before, err := captureWorkflowTree(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "outside.go"), []byte("undeclared"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	after, err := captureWorkflowTree(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed := changedWorkflowPaths(before, after)
+	if err := workflowChangedPathsAllowed(changed, []WorkflowStep{{Writes: []string{"internal/a/**"}}}); err == nil || !strings.Contains(err.Error(), "outside.go") {
+		t.Fatalf("backstop did not reject undeclared mutation; changed=%v err=%v", changed, err)
+	}
+}
+
+func TestParallelWorkflowMutationBackstopAcceptsDeclaredEditAndDelete(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "internal", "a")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(dir, "owned.go")
+	if err := os.WriteFile(file, []byte("before"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before, err := captureWorkflowTree(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(file); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "replacement.go"), []byte("after"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	after, err := captureWorkflowTree(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := workflowChangedPathsAllowed(changedWorkflowPaths(before, after), []WorkflowStep{{Writes: []string{"internal/a/**"}}}); err != nil {
+		t.Fatal(err)
+	}
+}

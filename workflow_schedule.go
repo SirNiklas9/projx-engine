@@ -1,10 +1,64 @@
 package main
 
 import (
+	"crypto/sha256"
 	"fmt"
+	"io/fs"
+	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
+
+type workflowTreeSnapshot map[string][sha256.Size]byte
+
+// captureWorkflowTree records repository-visible file content around a parallel
+// wave. The per-tool lease is the first line of defense; this snapshot is the
+// independent backstop that catches a worker or harness path the hook did not see.
+func captureWorkflowTree(root string) (workflowTreeSnapshot, error) {
+	out := workflowTreeSnapshot{}
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+		if entry.IsDir() && (rel == ".git" || rel == ".projx" || strings.HasPrefix(rel, ".git/") || strings.HasPrefix(rel, ".projx/")) {
+			return filepath.SkipDir
+		}
+		if entry.IsDir() || !entry.Type().IsRegular() {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		out[rel] = sha256.Sum256(data)
+		return nil
+	})
+	return out, err
+}
+
+func changedWorkflowPaths(before, after workflowTreeSnapshot) []string {
+	seen := map[string]bool{}
+	var out []string
+	for path, oldHash := range before {
+		if newHash, ok := after[path]; !ok || newHash != oldHash {
+			seen[path] = true
+			out = append(out, path)
+		}
+	}
+	for path := range after {
+		if _, existed := before[path]; !existed && !seen[path] {
+			out = append(out, path)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
 
 // validateWorkflowWrite keeps parallel write authority inside the repository.
 // Absolute paths and parent traversal fail closed; slash-normalized relative globs

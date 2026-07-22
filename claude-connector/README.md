@@ -18,7 +18,7 @@ Windows, macOS, and Linux. A different harness (Neovim, JetBrains) gets its own 
 | `UserPromptSubmit` | re-asserts the law + injects only the **new/changed** store records relevant to the prompt (task-sliced **delta**) |
 | `PreToolUse` (Bash\|Read\|Edit\|Write\|MultiEdit\|NotebookEdit) | blocks a tool call whose target path or shell command is off-limits (exit 2 + reason) |
 | `PreCompact` | marks the floor lost so the next turn re-sends protocol+law+slice after compaction |
-| `Stop` | **suggest-only**: if the user said `@remember` but nothing was committed, nudges once (exit 2); silent otherwise |
+| `Stop` | after mutations, verifies every touched project and stages per-project LEARN candidates for reconciliation; also nudges once when `@remember` was not committed |
 
 The engine resolves the project root from `CLAUDE_PROJECT_DIR` (or the payload `cwd`),
 so the command needs no arguments.
