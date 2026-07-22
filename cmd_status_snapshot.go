@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -307,9 +308,26 @@ func commandsUseBinary(commands []string, binaryPath string) bool {
 		return false
 	}
 	want := strings.ToLower(filepath.ToSlash(filepath.Clean(binaryPath)))
+	wants := []string{want}
+	if runtime.GOOS == "windows" {
+		dir := filepath.Dir(binaryPath)
+		switch strings.ToLower(filepath.Base(binaryPath)) {
+		case "projx-engine.exe":
+			wants = append(wants, strings.ToLower(filepath.ToSlash(filepath.Join(dir, "projx-engine-headless.exe"))))
+		case "projx-engine-headless.exe":
+			wants = append(wants, strings.ToLower(filepath.ToSlash(filepath.Join(dir, "projx-engine.exe"))))
+		}
+	}
 	for _, command := range commands {
 		got := strings.ToLower(filepath.ToSlash(strings.Trim(strings.TrimSpace(command), `"`)))
-		if strings.Contains(got, want) {
+		current := false
+		for _, candidate := range wants {
+			if strings.Contains(got, candidate) {
+				current = true
+				break
+			}
+		}
+		if current {
 			continue
 		}
 		fields := strings.Fields(got)

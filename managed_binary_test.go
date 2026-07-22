@@ -11,13 +11,14 @@ import (
 
 func TestProvisionManagedBinaryIsImmutableAndIdempotent(t *testing.T) {
 	home := t.TempDir()
-	first, copied, err := provisionManagedBinary(home)
+	rt, copied, err := provisionManagedRuntime(home)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !copied {
 		t.Fatal("first provision did not copy")
 	}
+	first := rt.CLI
 	wantRoot := filepath.Join(home, ".codex", "projx", "bin")
 	rel, err := filepath.Rel(wantRoot, first)
 	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
@@ -29,7 +30,11 @@ func TestProvisionManagedBinaryIsImmutableAndIdempotent(t *testing.T) {
 	if info, err := os.Stat(first); err != nil || info.Size() == 0 {
 		t.Fatalf("managed binary invalid: %v", err)
 	}
-	second, copied, err := provisionManagedBinary(home)
+	if runtime.GOOS == "windows" && (rt.Headless == rt.CLI || !strings.HasSuffix(rt.Headless, "-headless.exe")) {
+		t.Fatalf("headless adapter path = %q", rt.Headless)
+	}
+	secondRT, copied, err := provisionManagedRuntime(home)
+	second := secondRT.CLI
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,25 +54,45 @@ func TestSelfBinaryPathUsesConfiguredManagedBinary(t *testing.T) {
 
 func TestMCPBinaryPathUsesManagedBinaryNotEnvironment(t *testing.T) {
 	old := configuredBinary
+	oldHeadless := configuredHeadlessBinary
 	configuredBinary = filepath.Join("managed", "projx-engine.exe")
-	t.Cleanup(func() { configuredBinary = old })
+	configuredHeadlessBinary = filepath.Join("managed", "projx-engine-headless.exe")
+	t.Cleanup(func() { configuredBinary = old; configuredHeadlessBinary = oldHeadless })
 	t.Setenv("PROJX_ENGINE_BIN", filepath.Join("legacy", "projx-engine.exe"))
-	if got := mcpBinaryPath(); got != "managed/projx-engine.exe" {
+	if got := mcpBinaryPath(); got != "managed/projx-engine-headless.exe" {
 		t.Fatalf("mcpBinaryPath = %q", got)
+	}
+}
+
+func TestBackgroundAdaptersUseHeadlessManagedBinary(t *testing.T) {
+	oldCLI, oldHeadless := configuredBinary, configuredHeadlessBinary
+	configuredBinary = filepath.Join("managed", "projx-engine.exe")
+	configuredHeadlessBinary = filepath.Join("managed", "projx-engine-headless.exe")
+	t.Cleanup(func() { configuredBinary, configuredHeadlessBinary = oldCLI, oldHeadless })
+	want := "managed/projx-engine-headless.exe"
+	for name, command := range map[string]string{
+		"claude hook": projxHookCommand(),
+		"codex hook":  codexHookCommand(),
+		"dashboard":   codexDashboardCommand(),
+	} {
+		if !strings.Contains(command, want) || strings.Contains(command, `managed/projx-engine.exe"`) {
+			t.Errorf("%s command uses wrong runtime: %s", name, command)
+		}
 	}
 }
 
 func TestActivateManagedBinaryConfiguresExactPath(t *testing.T) {
 	old := configuredBinary
+	oldHeadless := configuredHeadlessBinary
 	configuredBinary = ""
-	t.Cleanup(func() { configuredBinary = old })
+	t.Cleanup(func() { configuredBinary = old; configuredHeadlessBinary = oldHeadless })
 	t.Setenv("HOME", t.TempDir())
 	path, _, err := activateManagedBinary()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if filepath.ToSlash(path) != mcpBinaryPath() {
-		t.Fatalf("MCP path %q does not match activated %q", mcpBinaryPath(), path)
+	if filepath.ToSlash(path) == mcpBinaryPath() && runtime.GOOS == "windows" {
+		t.Fatalf("MCP path %q incorrectly uses interactive CLI %q", mcpBinaryPath(), path)
 	}
 }
 

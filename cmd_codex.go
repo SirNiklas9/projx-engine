@@ -20,9 +20,9 @@ var codexSkillMD string
 
 var codexHookSpecs = lifecycleHookSpecs("Bash|Read|Edit|Write|exec_command|shell|apply_patch")
 
-func codexHookCommand() string { return `"` + selfBinaryPath() + `" hook` }
+func codexHookCommand() string { return `"` + backgroundBinaryPath() + `" hook` }
 func codexDashboardCommand() string {
-	return `"` + selfBinaryPath() + `" status --ensure-server`
+	return `"` + backgroundBinaryPath() + `" status --ensure-server`
 }
 
 func mergeCodexHooks(path string) (added, skipped []string, err error) {
@@ -217,16 +217,17 @@ func runCodexGlobalBootstrap() {
 	if err != nil {
 		die("bootstrap: cannot resolve home dir: %v", err)
 	}
-	managed, copied, err := provisionManagedBinary(home)
+	rt, copied, err := provisionManagedRuntime(home)
 	if err != nil {
 		die("bootstrap: provision managed engine: %v", err)
 	}
-	configuredBinary = managed
+	configuredBinary = rt.CLI
+	configuredHeadlessBinary = rt.Headless
 	fmt.Println("projx bootstrap: preparing Codex adapter (idempotent)")
 	if copied {
-		fmt.Printf("  engine: activated immutable binary -> %s\n", managed)
+		fmt.Printf("  engine: activated immutable runtime -> %s\n", rt.CLI)
 	} else {
-		fmt.Printf("  engine: already active -> %s\n", managed)
+		fmt.Printf("  engine: already active -> %s\n", rt.CLI)
 	}
 	if err := bootstrapCodex(home); err != nil {
 		die("bootstrap: install Codex adapter: %v", err)

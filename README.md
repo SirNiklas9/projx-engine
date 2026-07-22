@@ -29,6 +29,10 @@ does not require PATH edits, an installer script, or replacement of a running pr
 The plugin bundles the projx skill + `/projx:*` commands; on first use the skill fetches
 the binary and runs `init --global` for you. Repeating the process upgrades and repairs
 ProjX. Each release has a separate path, so existing sessions finish uninterrupted.
+On Windows the managed runtime contains an interactive `projx-engine.exe` and a
+GUI-subsystem `projx-engine-headless.exe` proxy. Harness hooks, MCP, and background
+status use the proxy, which forwards protocol stdio to the CLI without flashing a
+console window.
 
 **Per project (the "drag and drop"):**
 ```sh

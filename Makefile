@@ -9,10 +9,14 @@ export GOWORK = off
 BIN := projx-engine
 DEST ?= $(HOME)/.local/bin/$(BIN)
 
-.PHONY: build install version clean
+.PHONY: build build-windows install version clean
 
 build:                ## build ./$(BIN) with the git-stamped version
 	go build -ldflags "$(LDFLAGS)" -o $(BIN) .
+
+build-windows:        ## build the paired Windows runtime with required sibling names
+	GOOS=windows GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o projx-engine.exe .
+	GOOS=windows GOARCH=amd64 go build -ldflags "-H=windowsgui" -o projx-engine-headless.exe ./cmd/projx-headless
 
 install:              ## build + install to ~/.local/bin (git-stamped version)
 	go build -ldflags "$(LDFLAGS)" -o $(DEST) .

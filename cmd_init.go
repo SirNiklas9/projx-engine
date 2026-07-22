@@ -80,7 +80,7 @@ func mergeMCPServer(absRoot, name string, def map[string]any) (msg string, added
 // spawned WITHOUT a shell, so unlike the hook there is no ${} expansion — the path is baked
 // at init. Shares selfBinaryPath with the hook so hook and MCP never point at different bins.
 func mcpBinaryPath() string {
-	return selfBinaryPath()
+	return backgroundBinaryPath()
 }
 
 // installMCPConfig registers ProjX's own MCP server (store_query/route/gate_check/

@@ -46,8 +46,10 @@ fallbacks are `--compact`, `--watch`, and `--json`.
 
 ## Setup
 
-The skill owns setup and updates. It stages a prebuilt release and runs global
-bootstrap; the engine then copies itself to an immutable, content-addressed path
+The skill owns setup and updates. On Windows it stages the paired interactive
+engine and `projx-engine-headless.exe` proxy beside one another; lifecycle hooks,
+MCP, and background status use the proxy so they never open console windows. It
+then runs global bootstrap; the engine copies both assets to an immutable path
 under `~/.codex/projx/bin/` and points Codex and Claude adapters at that exact
 path. Do not ask the user to install it, edit PATH, or replace a running binary.
 

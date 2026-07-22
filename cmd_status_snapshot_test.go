@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -168,6 +169,18 @@ func TestConfiguredBinaryParity(t *testing.T) {
 	}
 	if commandsUseBinary(nil, binary) {
 		t.Fatal("missing configuration cannot be current")
+	}
+}
+
+func TestConfiguredBinaryParityAcceptsHeadlessSibling(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows managed runtime pairing")
+	}
+	root := t.TempDir()
+	cli := filepath.Join(root, "projx-engine.exe")
+	headless := filepath.Join(root, "projx-engine-headless.exe")
+	if !commandsUseBinary([]string{`"` + filepath.ToSlash(headless) + `" hook`}, cli) {
+		t.Fatal("headless adapter was not recognized as the CLI's managed-runtime sibling")
 	}
 }
 

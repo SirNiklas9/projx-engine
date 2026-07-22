@@ -51,6 +51,16 @@ func selfBinaryPath() string {
 	return "projx-engine"
 }
 
+// backgroundBinaryPath is the harness-owned entry point. On Windows it uses a
+// GUI-subsystem PE so launching it never creates a transient console window.
+// Harnesses still supply stdin/stdout/stderr pipes, which Go inherits normally.
+func backgroundBinaryPath() string {
+	if configuredHeadlessBinary != "" {
+		return filepath.ToSlash(configuredHeadlessBinary)
+	}
+	return selfBinaryPath()
+}
+
 // projxHookCommand is the command every ProjX lifecycle hook runs. Claude Code executes
 // hooks through a shell (bash, even on Windows via Git Bash), so the command must be
 // BASH-SAFE. A bare `projx-engine` needs the binary on PATH — which a Windows install to
@@ -58,7 +68,7 @@ func selfBinaryPath() string {
 // forward-slash path as the default, quoted (spaces-safe), with a runtime PROJX_ENGINE_BIN
 // override. Result works with NO PATH configuration. isProjxHookCmd detects every variant.
 func projxHookCommand() string {
-	return `"${PROJX_ENGINE_BIN:-` + selfBinaryPath() + `}" hook`
+	return `"${PROJX_ENGINE_BIN:-` + backgroundBinaryPath() + `}" hook`
 }
 
 // isProjxHookCmd reports whether a hook command string is a ProjX lifecycle hook. It
@@ -120,17 +130,18 @@ func runGlobalBootstrap() {
 	}
 	claudeDir := filepath.Join(home, ".claude")
 	settingsPath := filepath.Join(claudeDir, "settings.json")
-	managed, copied, err := provisionManagedBinary(home)
+	rt, copied, err := provisionManagedRuntime(home)
 	if err != nil {
 		die("bootstrap: provision managed engine: %v", err)
 	}
-	configuredBinary = managed
+	configuredBinary = rt.CLI
+	configuredHeadlessBinary = rt.Headless
 
 	fmt.Println("projx bootstrap: preparing the GLOBAL ProjX layer (idempotent)")
 	if copied {
-		fmt.Printf("  engine: activated immutable binary → %s\n", managed)
+		fmt.Printf("  engine: activated immutable runtime → %s\n", rt.CLI)
 	} else {
-		fmt.Printf("  engine: already active → %s\n", managed)
+		fmt.Printf("  engine: already active → %s\n", rt.CLI)
 	}
 
 	// 1. Merge the lifecycle hook into ~/.claude/settings.json, preserving existing hooks.

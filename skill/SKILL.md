@@ -30,7 +30,11 @@ without Windows locked-file replacement.
 4. Run the managed binary's `version`, then report that the harness must restart
    to load changed hooks or MCP processes. Existing sessions are not killed.
 
-Release assets are `projx-engine_windows_amd64.exe`,
+Windows requires the paired assets `projx-engine_windows_amd64.exe` and
+`projx-engine-headless_windows_amd64.exe`; stage them together and rename the
+second to `projx-engine-headless.exe` beside the CLI before running bootstrap.
+The headless proxy preserves harness protocol pipes while preventing console
+windows. Other release assets are
 `projx-engine_linux_amd64`, `projx-engine_linux_arm64`, and, when published,
 the corresponding Darwin asset. Make Unix downloads executable before invoking
 them. If no matching release asset exists, report that constraint; do not
