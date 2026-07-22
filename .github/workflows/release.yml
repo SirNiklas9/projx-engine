@@ -18,14 +18,21 @@ jobs:
           path: projx-engine
       - name: Check out ProjX dependencies
         shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           cd "$GITHUB_WORKSPACE"
+          clone_with_token() {
+            local owner="$1"
+            local repo="$2"
+            git clone --depth 1 "https://x-access-token:${GITHUB_TOKEN}@github.com/${owner}/${repo}.git" "$repo"
+          }
           for repo in projx-core projx-store projx-verify; do
-            git clone --depth 1 "https://github.com/SirNiklas9/${repo}.git" "$repo"
+            clone_with_token "SirNiklas9" "$repo"
           done
           for repo in Pulp Pulp-cage Pulp-ext-confine Pulp-ext-egress Pulp-ext-hook Pulp-ext-fuse Pulp-grants; do
-            git clone --depth 1 "https://github.com/BananaLabs-OSS/${repo}.git" "$repo"
+            clone_with_token "BananaLabs-OSS" "$repo"
           done
       - name: Set up Go
         uses: actions/setup-go@v5
