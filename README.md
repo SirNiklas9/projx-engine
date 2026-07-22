@@ -29,6 +29,16 @@ does not require PATH edits, an installer script, or replacement of a running pr
 The plugin bundles the projx skill + `/projx:*` commands; on first use the skill fetches
 the binary and runs `init --global` for you. Repeating the process upgrades and repairs
 ProjX. Each release has a separate path, so existing sessions finish uninterrupted.
+
+**Install in Codex:** add the `SirNiklas9/projx-engine` marketplace in the Codex
+Plugins browser (or with `/plugins`), install **ProjX**, then start a new task and
+say **“Enable ProjX for this project.”** Codex performs the entire machine and
+project bootstrap: release selection, download, immutable runtime activation,
+hooks, MCP, store creation/migration, indexing, and dashboard integration. The
+only expected interaction is approval for the download/configuration and one
+Codex restart when adapters change; no PATH, terminal installer, or database
+steps are delegated to the user.
+
 On Windows the managed runtime contains an interactive `projx-engine.exe` and a
 GUI-subsystem `projx-engine-headless.exe` proxy. Harness hooks, MCP, and background
 status use the proxy, which forwards protocol stdio to the CLI without flashing a

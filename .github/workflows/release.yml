@@ -1,0 +1,58 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  binaries:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out ProjX engine
+        uses: actions/checkout@v4
+        with:
+          path: projx-engine
+      - name: Check out ProjX dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+          for repo in projx-core projx-store projx-verify; do
+            git clone --depth 1 "https://github.com/SirNiklas9/${repo}.git" "$repo"
+          done
+          for repo in Pulp Pulp-cage Pulp-ext-confine Pulp-ext-egress Pulp-ext-hook Pulp-ext-fuse Pulp-grants; do
+            git clone --depth 1 "https://github.com/BananaLabs-OSS/${repo}.git" "$repo"
+          done
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: projx-engine/go.mod
+          cache-dependency-path: projx-engine/go.sum
+      - name: Test
+        working-directory: projx-engine
+        run: go test ./...
+      - name: Build release assets
+        working-directory: projx-engine
+        shell: bash
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          version="${GITHUB_REF_NAME}"
+          GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.version=${version}" -o dist/projx-engine_linux_amd64 .
+          GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "-s -w -X main.version=${version}" -o dist/projx-engine_linux_arm64 .
+          GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.version=${version}" -o dist/projx-engine_darwin_amd64 .
+          GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags "-s -w -X main.version=${version}" -o dist/projx-engine_darwin_arm64 .
+          GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.version=${version}" -o dist/projx-engine_windows_amd64.exe .
+          GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "-s -w -H=windowsgui" -o dist/projx-engine-headless_windows_amd64.exe ./cmd/projx-headless
+          (cd dist && sha256sum projx-engine_* > projx-engine_checksums.txt)
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: projx-engine/dist/*
+          generate_release_notes: true

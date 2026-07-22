@@ -1,0 +1,20 @@
+{
+  "name": "projx",
+  "interface": {
+    "displayName": "ProjX"
+  },
+  "plugins": [
+    {
+      "name": "projx",
+      "source": {
+        "source": "local",
+        "path": "./plugins/projx"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

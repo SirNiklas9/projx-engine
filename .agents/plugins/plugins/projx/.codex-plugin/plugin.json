@@ -1,0 +1,28 @@
+{
+  "name": "projx",
+  "version": "0.6.0",
+  "description": "ProjX is a harness-agnostic governed knowledge layer for Codex: scoped recall, enforced gates, verification, and durable learning.",
+  "author": {
+    "name": "SirNiklas9",
+    "url": "https://github.com/SirNiklas9"
+  },
+  "homepage": "https://github.com/SirNiklas9/projx-engine",
+  "repository": "https://github.com/SirNiklas9/projx-engine",
+  "license": "MIT",
+  "keywords": ["projx", "knowledge", "governance", "verification", "routing"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "ProjX",
+    "shortDescription": "Governed project knowledge for every Codex task.",
+    "longDescription": "Installs and operates ProjX as a harness-agnostic layer above Codex. ProjX injects scoped knowledge, enforces project gates, verifies work, reconciles stale records, and stages durable learning without requiring manual setup.",
+    "developerName": "SirNiklas9",
+    "category": "Productivity",
+    "capabilities": ["Interactive", "Write"],
+    "websiteURL": "https://github.com/SirNiklas9/projx-engine",
+    "defaultPrompt": [
+      "Enable ProjX for this project.",
+      "Show my ProjX dashboard.",
+      "Reconcile stale ProjX knowledge."
+    ]
+  }
+}
