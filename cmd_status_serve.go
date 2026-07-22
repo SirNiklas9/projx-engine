@@ -92,6 +92,44 @@ func runStatusServe(absRoot string, args []string) {
 	}
 }
 
+// startStatusServerInProcess attaches the persistent dashboard to the MCP
+// process lifecycle. A short-lived SessionStart hook cannot safely own a
+// detached child under Windows job containment; the already long-lived MCP
+// process can serve the same loopback dashboard without a console or orphan.
+func startStatusServerInProcess(absRoot string) error {
+	sid := latestStatusSession(absRoot)
+	baseURL := "http://" + statusDashboardAddr
+	if activateStatusServer(baseURL, absRoot, sid) == nil {
+		return nil
+	}
+	_, _, err := startStatusServerBackground(absRoot, sid, statusDashboardAddr)
+	if err != nil {
+		// Another MCP may have won the listen race; activate it before failing.
+		if activateStatusServer(baseURL, absRoot, sid) == nil {
+			return nil
+		}
+	}
+	return err
+}
+
+func startStatusServerBackground(absRoot, sid, addr string) (*http.Server, net.Listener, error) {
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !isLoopbackListener(ln.Addr()) {
+		_ = ln.Close()
+		return nil, nil, fmt.Errorf("refusing non-loopback listener %s", ln.Addr())
+	}
+	server := &http.Server{
+		Handler:           statusDashboardHandler(absRoot, sid),
+		ReadHeaderTimeout: 5 * time.Second,
+		IdleTimeout:       30 * time.Second,
+	}
+	go func() { _ = server.Serve(ln) }()
+	return server, ln, nil
+}
+
 func ensureStatusServer(absRoot string, args []string, show bool) error {
 	opts := parseStatusServeOptions(args)
 	if opts.Addr == "127.0.0.1:0" {

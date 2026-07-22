@@ -43,6 +43,9 @@ type mcpErr struct {
 }
 
 func runMCPCmd(absRoot string, _ []string) {
+	// MCP is harness-neutral and long-lived, making it the reliable owner for
+	// the loopback dashboard (especially under Windows job containment).
+	_ = startStatusServerInProcess(absRoot)
 	in := bufio.NewScanner(os.Stdin)
 	in.Buffer(make([]byte, 0, 1<<20), 16<<20) // allow large messages
 	out := bufio.NewWriter(os.Stdout)

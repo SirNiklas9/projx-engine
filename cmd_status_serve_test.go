@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +17,25 @@ func TestParseStatusServeOptions(t *testing.T) {
 	opts := parseStatusServeOptions([]string{"--serve", "--addr", "127.0.0.1:8123", "--session", "s1", "--no-open"})
 	if opts.Addr != "127.0.0.1:8123" || opts.Session != "s1" || !opts.NoOpen {
 		t.Fatalf("options = %#v", opts)
+	}
+}
+
+func TestBackgroundStatusServerServesSnapshot(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("PROJX_YOURS_DIR", filepath.Join(t.TempDir(), "yours"))
+	seedSessionStore(t, root)
+	server, ln, err := startStatusServerBackground(root, "", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = server.Shutdown(context.Background()) })
+	resp, err := http.Get("http://" + ln.Addr().String() + "/api/status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
 	}
 }
 
