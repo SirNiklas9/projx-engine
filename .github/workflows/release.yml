@@ -19,14 +19,14 @@ jobs:
       - name: Check out ProjX dependencies
         shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_CLONE_TOKEN: ${{ secrets.PROJX_RELEASE_TOKEN != '' && secrets.PROJX_RELEASE_TOKEN || github.token }}
         run: |
           set -euo pipefail
           cd "$GITHUB_WORKSPACE"
           clone_with_token() {
             local owner="$1"
             local repo="$2"
-            git clone --depth 1 "https://x-access-token:${GITHUB_TOKEN}@github.com/${owner}/${repo}.git" "$repo"
+            git clone --depth 1 "https://x-access-token:${GH_CLONE_TOKEN}@github.com/${owner}/${repo}.git" "$repo"
           }
           for repo in projx-core projx-store projx-verify; do
             clone_with_token "SirNiklas9" "$repo"
