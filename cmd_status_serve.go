@@ -143,6 +143,9 @@ func ensureStatusServer(absRoot string, args []string, show bool) error {
 		if show {
 			return openStatusBrowser(url + "/")
 		}
+		if statusLinkRequested(args) {
+			fmt.Println(statusDashboardLink(url))
+		}
 		return nil
 	}
 
@@ -163,7 +166,26 @@ func ensureStatusServer(absRoot string, args []string, show bool) error {
 	if err := cmd.Start(); err != nil {
 		return err
 	}
-	return cmd.Process.Release()
+	if err := cmd.Process.Release(); err != nil {
+		return err
+	}
+	if statusLinkRequested(args) {
+		fmt.Println(statusDashboardLink(url))
+	}
+	return nil
+}
+
+func statusLinkRequested(args []string) bool {
+	for _, arg := range args {
+		if arg == "--link" {
+			return true
+		}
+	}
+	return false
+}
+
+func statusDashboardLink(baseURL string) string {
+	return "[Open ProjX dashboard](" + strings.TrimRight(baseURL, "/") + "/)"
 }
 
 func activateStatusServer(baseURL, root, sid string) error {

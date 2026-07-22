@@ -37,7 +37,7 @@ func TestMergeCodexHooksAndProjectConfig(t *testing.T) {
 		t.Fatalf("SessionStart handlers = %d, want lifecycle + dashboard", len(sessionHooks))
 	}
 	dashboardCommand := sessionHooks[1].(map[string]any)["command"].(string)
-	if !strings.Contains(dashboardCommand, "status --ensure-server") {
+	if !strings.Contains(dashboardCommand, "status --ensure-server --link") {
 		t.Fatalf("dashboard command = %q", dashboardCommand)
 	}
 	configDir := filepath.Join(root, ".codex")

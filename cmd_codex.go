@@ -22,7 +22,7 @@ var codexHookSpecs = lifecycleHookSpecs("Bash|Read|Edit|Write|exec_command|shell
 
 func codexHookCommand() string { return `"` + backgroundBinaryPath() + `" hook` }
 func codexDashboardCommand() string {
-	return `"` + backgroundBinaryPath() + `" status --ensure-server`
+	return `"` + backgroundBinaryPath() + `" status --ensure-server --link`
 }
 
 func mergeCodexHooks(path string) (added, skipped []string, err error) {

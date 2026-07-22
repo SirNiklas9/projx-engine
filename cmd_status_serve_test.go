@@ -20,6 +20,15 @@ func TestParseStatusServeOptions(t *testing.T) {
 	}
 }
 
+func TestStatusDashboardLinkIsMarkdown(t *testing.T) {
+	if got := statusDashboardLink("http://127.0.0.1:47632"); got != "[Open ProjX dashboard](http://127.0.0.1:47632/)" {
+		t.Fatalf("link = %q", got)
+	}
+	if !statusLinkRequested([]string{"--ensure-server", "--link"}) || statusLinkRequested([]string{"--ensure-server"}) {
+		t.Fatal("--link detection is not adapter-specific")
+	}
+}
+
 func TestBackgroundStatusServerServesSnapshot(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("PROJX_YOURS_DIR", filepath.Join(t.TempDir(), "yours"))

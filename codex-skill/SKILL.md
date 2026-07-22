@@ -24,6 +24,9 @@ Codex automatically. Its MCP server exposes deterministic pull tools.
 
 ## Codex GUI status dashboard
 
+The Codex-only `SessionStart` adapter emits an **Open ProjX dashboard** link for
+each new task. Other harnesses do not receive this presentation behavior.
+
 When the user asks to show, open, refresh, or inspect the ProjX dashboard in
 Codex:
 
