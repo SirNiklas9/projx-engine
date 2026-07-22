@@ -82,7 +82,10 @@ func runSessionContext(absRoot, session, task string, reset bool) {
 // the native file-backed checkpoint store and the (opt-in) v2 selector. Returns the text
 // to inject ("" for a PreCompact reset).
 func buildSessionContext(absRoot, session, task string, reset bool) string {
-	st := openStore(absRoot)
+	st, err := openStoreExistingSafe(absRoot)
+	if err != nil {
+		return ""
+	}
 	defer st.Close()
 	return store.SessionContext(st, osCheckpoints{absRoot}, session, task, reset, contextSelector(st, task))
 }
@@ -99,7 +102,10 @@ func runSessionSuggestCmd(absRoot string, args []string) {
 
 // sessionSuggest delegates the Stop suggestion to the shared definition.
 func sessionSuggest(absRoot, session string) (msg string, block bool) {
-	st := openStore(absRoot)
+	st, err := openStoreExistingSafe(absRoot)
+	if err != nil {
+		return "", false
+	}
 	defer st.Close()
 	return store.SessionSuggest(st, osCheckpoints{absRoot}, session)
 }

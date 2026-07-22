@@ -20,23 +20,144 @@ import (
 // route to the owning file by Scope.Owner(); callers see a single Store.
 type projectStore struct {
 	*store.Workspace
-	project *store.SQLite
-	yours   *store.SQLite
-	space   *store.SQLite // optional workspace-level store (nil when not in a workspace)
+	project         *store.SQLite
+	yours           *store.SQLite
+	space           *store.SQLite // optional workspace-level store (nil when not in a workspace)
+	tempProjectPath string
 }
 
 // Close releases the underlying files.
 func (p *projectStore) Close() error {
-	e1 := p.project.Close()
-	if err := p.yours.Close(); err != nil && e1 == nil {
-		e1 = err
+	var e1 error
+	if p.project != nil {
+		e1 = p.project.Close()
+	}
+	if p.yours != nil {
+		if err := p.yours.Close(); err != nil && e1 == nil {
+			e1 = err
+		}
 	}
 	if p.space != nil {
 		if err := p.space.Close(); err != nil && e1 == nil {
 			e1 = err
 		}
 	}
+	if p.tempProjectPath != "" {
+		if err := os.Remove(p.tempProjectPath); err != nil && !os.IsNotExist(err) && e1 == nil {
+			e1 = err
+		}
+	}
 	return e1
+}
+
+func hasProjectStore(absRoot string) bool {
+	if absRoot == "" {
+		return false
+	}
+	fi, err := os.Stat(filepath.Join(absRoot, ".projx", "store.db"))
+	return err == nil && !fi.IsDir()
+}
+
+func openEphemeralProjectStore() (*store.SQLite, string, error) {
+	f, err := os.CreateTemp("", "projx-empty-project-*.db")
+	if err != nil {
+		return nil, "", err
+	}
+	path := f.Name()
+	if err := f.Close(); err != nil {
+		_ = os.Remove(path)
+		return nil, "", err
+	}
+	st, err := store.Open(path)
+	if err != nil {
+		_ = os.Remove(path)
+		return nil, "", err
+	}
+	return st, path, nil
+}
+
+func openStoreScoped(absRoot string, createProject bool) (*projectStore, error) {
+	projDir := filepath.Join(absRoot, ".projx")
+	var (
+		project         *store.SQLite
+		projectIface    store.Store
+		tempProjectPath string
+		err             error
+	)
+	if hasProjectStore(absRoot) {
+		project, err = store.Open(filepath.Join(projDir, "store.db"))
+		if err != nil {
+			return nil, fmt.Errorf("open project store: %v", err)
+		}
+		projectIface = project
+	} else if createProject {
+		if err := os.MkdirAll(projDir, 0o755); err != nil {
+			return nil, fmt.Errorf("mkdir .projx: %v", err)
+		}
+		project, err = store.Open(filepath.Join(projDir, "store.db"))
+		if err != nil {
+			return nil, fmt.Errorf("open project store: %v", err)
+		}
+		projectIface = project
+	} else {
+		project, tempProjectPath, err = openEphemeralProjectStore()
+		if err != nil {
+			return nil, fmt.Errorf("open ephemeral project store: %v", err)
+		}
+		projectIface = project
+	}
+	fallbackYours := filepath.Join(projDir, "yours.db") // project-local fallback
+	yoursPath := fallbackYours
+	if yd := yoursDir(); yd != "" {
+		if err := os.MkdirAll(yd, 0o755); err == nil {
+			yoursPath = filepath.Join(yd, "store.db")
+		}
+	}
+	yours, err := store.Open(yoursPath)
+	if err != nil {
+		if yoursPath != fallbackYours {
+			yours, err = store.Open(fallbackYours)
+		}
+		if err != nil {
+			if project != nil {
+				_ = project.Close()
+			}
+			if tempProjectPath != "" {
+				_ = os.Remove(tempProjectPath)
+			}
+			return nil, fmt.Errorf("open yours store: %v", err)
+		}
+	}
+	var space *store.SQLite
+	var spaceIface store.Store
+	if wp := workspaceStorePath(absRoot); wp != "" {
+		if s, err := store.Open(wp); err == nil {
+			space, spaceIface = s, s
+		}
+	}
+	return &projectStore{
+		Workspace:       store.NewComposite(yours, spaceIface, projectIface),
+		project:         project,
+		yours:           yours,
+		space:           space,
+		tempProjectPath: tempProjectPath,
+	}, nil
+}
+
+// openStoreSafe is openStore that returns an error instead of exiting. The gate
+// path (PreToolUse) uses this so a store-open failure can FAIL CLOSED (block the
+// action) rather than crash the hook with exit 1 — which Claude Code treats as
+// non-blocking, i.e. fail-OPEN. See doc/enforcement-follow-override-plan (A).
+func openStoreSafe(absRoot string) (*projectStore, error) {
+	return openStoreScoped(absRoot, true)
+}
+
+// openStoreExistingSafe opens the composed store without creating a new project
+// store when absRoot is only a workspace root or loose directory. This keeps
+// read-only paths like session context, status, and tool gating from silently
+// turning a workspace parent into a project.
+func openStoreExistingSafe(absRoot string) (*projectStore, error) {
+	return openStoreScoped(absRoot, false)
 }
 
 // yoursDir is the per-user directory for the YOURS store (global + workspace
@@ -65,60 +186,6 @@ func openStore(absRoot string) *projectStore {
 	return ps
 }
 
-// openStoreSafe is openStore that returns an error instead of exiting. The gate
-// path (PreToolUse) uses this so a store-open failure can FAIL CLOSED (block the
-// action) rather than crash the hook with exit 1 — which Claude Code treats as
-// non-blocking, i.e. fail-OPEN. See doc/enforcement-follow-override-plan (A).
-func openStoreSafe(absRoot string) (*projectStore, error) {
-	projDir := filepath.Join(absRoot, ".projx")
-	if err := os.MkdirAll(projDir, 0o755); err != nil {
-		return nil, fmt.Errorf("mkdir .projx: %v", err)
-	}
-	project, err := store.Open(filepath.Join(projDir, "store.db"))
-	if err != nil {
-		return nil, fmt.Errorf("open project store: %v", err)
-	}
-	fallbackYours := filepath.Join(projDir, "yours.db") // project-local fallback
-	yoursPath := fallbackYours
-	if yd := yoursDir(); yd != "" {
-		if err := os.MkdirAll(yd, 0o755); err == nil {
-			yoursPath = filepath.Join(yd, "store.db")
-		}
-	}
-	yours, err := store.Open(yoursPath)
-	if err != nil {
-		// The per-user YOURS store can be unreachable from inside a confined
-		// agent run: Landlock (Linux) / AppContainer (Windows) scope the agent
-		// to the project root, which excludes <UserConfigDir>/projx, so opening
-		// it fails with SQLITE_CANTOPEN. Fall back to a project-local yours store
-		// (inside the cage) so project-scope commits still persist. The agent's
-		// knowledge is project knowledge anyway; global/workspace records are the
-		// human's and are not the caged agent's to write.
-		if yoursPath != fallbackYours {
-			yours, err = store.Open(fallbackYours)
-		}
-		if err != nil {
-			_ = project.Close()
-			return nil, fmt.Errorf("open yours store: %v", err)
-		}
-	}
-	// Optional WORKSPACE level: a ".projx-workspace" folder on an ancestor of the repo
-	// (a multi-repo workspace like "MonkeyLabs" with its own rules). When present,
-	// workspace-scoped records compose from THERE instead of the per-user yours store.
-	// Optional — a bare repo has none, and everything still composes (project + global).
-	var space *store.SQLite
-	var spaceIface store.Store // MUST stay a true-nil interface when absent (a nil *SQLite boxed in an interface is != nil)
-	if wp := workspaceStorePath(absRoot); wp != "" {
-		if s, err := store.Open(wp); err == nil {
-			space, spaceIface = s, s
-		}
-	}
-	return &projectStore{
-		Workspace: store.NewComposite(yours, spaceIface, project),
-		project:   project, yours: yours, space: space,
-	}, nil
-}
-
 // workspaceStorePath walks UP from absRoot for a workspace marker — a ".projx-workspace"
 // directory on an ancestor folder (holding store.db). Returns the workspace store path,
 // or "" if the repo isn't inside a workspace. Bounded walk; stops at the filesystem root.
@@ -139,13 +206,14 @@ func workspaceStorePath(absRoot string) string {
 }
 
 // enclosingProjectRoot walks UP from start to the nearest ancestor directory that
-// owns a ".projx" directory and returns it; "" when none is found before the
-// filesystem root. Mirrors the target-based walk in targetStoreRoot (gatecheck.go):
-// a ".projx" directory is what marks a ProjX project root.
+// owns a real project store (.projx/store.db) and returns it; "" when none is
+// found before the filesystem root. Mirrors the target-based walk in
+// targetStoreRoot (gatecheck.go): a project store is what marks a ProjX project
+// root.
 func enclosingProjectRoot(start string) string {
 	dir := start
 	for i := 0; i < 64; i++ {
-		if fi, err := os.Stat(filepath.Join(dir, ".projx")); err == nil && fi.IsDir() {
+		if fi, err := os.Stat(filepath.Join(dir, ".projx", "store.db")); err == nil && !fi.IsDir() {
 			return dir
 		}
 		parent := filepath.Dir(dir)

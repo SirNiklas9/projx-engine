@@ -143,8 +143,8 @@ func ensureStatusServer(absRoot string, args []string, show bool) error {
 		if show {
 			return openStatusBrowser(url + "/")
 		}
-		if statusLinkRequested(args) {
-			fmt.Println(statusDashboardLink(url))
+		if output := requestedStatusDashboardOutput(absRoot, args, url); output != "" {
+			fmt.Println(output)
 		}
 		return nil
 	}
@@ -169,15 +169,33 @@ func ensureStatusServer(absRoot string, args []string, show bool) error {
 	if err := cmd.Process.Release(); err != nil {
 		return err
 	}
-	if statusLinkRequested(args) {
-		fmt.Println(statusDashboardLink(url))
+	if output := requestedStatusDashboardOutput(absRoot, args, url); output != "" {
+		fmt.Println(output)
 	}
 	return nil
 }
 
 func statusLinkRequested(args []string) bool {
 	for _, arg := range args {
-		if arg == "--link" {
+		if arg == "--link" || arg == "--link-if-relevant" {
+			return true
+		}
+	}
+	return false
+}
+
+func statusLinkRelevantRequested(args []string) bool {
+	for _, arg := range args {
+		if arg == "--link-if-relevant" {
+			return true
+		}
+	}
+	return false
+}
+
+func statusCodexSystemMessageRequested(args []string) bool {
+	for _, arg := range args {
+		if arg == "--codex-system-message-if-relevant" {
 			return true
 		}
 	}
@@ -186,6 +204,52 @@ func statusLinkRequested(args []string) bool {
 
 func statusDashboardLink(baseURL string) string {
 	return "[Open ProjX dashboard](" + strings.TrimRight(baseURL, "/") + "/)"
+}
+
+func statusLinkRoot(absRoot string) string {
+	if root := nearestProjxDir(absRoot); root != "" {
+		return root
+	}
+	if wp := workspaceStorePath(absRoot); wp != "" {
+		return filepath.Dir(filepath.Dir(wp))
+	}
+	return globalStatusRoot()
+}
+
+func globalStatusRoot() string {
+	root := yoursDir()
+	if root == "" {
+		return ""
+	}
+	if fi, err := os.Stat(filepath.Join(root, "store.db")); err == nil && !fi.IsDir() {
+		return root
+	}
+	return ""
+}
+
+func requestedStatusDashboardLink(absRoot string, args []string, baseURL string) string {
+	if statusLinkRelevantRequested(args) {
+		if statusLinkRoot(absRoot) == "" {
+			return ""
+		}
+	}
+	return statusDashboardLink(baseURL)
+}
+
+func requestedStatusDashboardOutput(absRoot string, args []string, baseURL string) string {
+	if statusCodexSystemMessageRequested(args) {
+		if statusLinkRoot(absRoot) == "" {
+			return ""
+		}
+		payload, _ := json.Marshal(map[string]string{
+			"systemMessage": "ProjX live status: " + strings.TrimRight(baseURL, "/") + "/",
+		})
+		return string(payload)
+	}
+	if statusLinkRequested(args) {
+		return requestedStatusDashboardLink(absRoot, args, baseURL)
+	}
+	return ""
 }
 
 func activateStatusServer(baseURL, root, sid string) error {

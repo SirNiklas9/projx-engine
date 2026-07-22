@@ -14,7 +14,8 @@ an installer/build script, or replace a running executable.
 
 ## Bootstrap or update
 
-The canonical runtime is managed beneath `~/.codex/projx/bin/`. Binaries are
+The canonical runtime is managed beneath the user's neutral ProjX home,
+typically `os.UserConfigDir()/projx/bin/`. Binaries are
 immutable and content-addressed. Hooks and MCP configurations point to one exact
 binary. A newer release receives a new path, allowing active sessions to finish
 without Windows locked-file replacement.
@@ -25,7 +26,7 @@ without Windows locked-file replacement.
    release into a temporary directory. Do not build from source.
 3. Run the downloaded binary directly from that temporary path:
    `projx-engine init --global`. The command copies itself atomically into
-   `~/.codex/projx/bin/<version-content>/`, then configures both Codex and Claude
+   `<projx-home>/bin/<version-content>/`, then configures both Codex and Claude
    adapters to that immutable path and refreshes their skills.
 4. Run the managed binary's `version`, then report that the harness must restart
    to load changed hooks or MCP processes. Existing sessions are not killed.

@@ -20,9 +20,9 @@ var codexSkillMD string
 
 var codexHookSpecs = lifecycleHookSpecs("Bash|Read|Edit|Write|exec_command|shell|apply_patch")
 
-func codexHookCommand() string { return `"` + backgroundBinaryPath() + `" hook` }
-func codexDashboardCommand() string {
-	return `"` + backgroundBinaryPath() + `" status --ensure-server --link`
+func codexHookCommand() string { return `"` + hookBinaryPath() + `" hook --codex` }
+func codexHookCommandWindows() string {
+	return `& "` + hookBinaryPath() + `" hook --codex`
 }
 
 func mergeCodexHooks(path string) (added, skipped []string, err error) {
@@ -39,40 +39,26 @@ func mergeCodexHooks(path string) (added, skipped []string, err error) {
 		hooks = map[string]any{}
 	}
 	want := codexHookCommand()
-	dashboard := codexDashboardCommand()
+	wantWindows := codexHookCommandWindows()
 	changed := false
 	for _, s := range codexHookSpecs {
 		arr, _ := hooks[s.event].([]any)
 		kept, hasCurrent, dropped := pruneStaleProjxGroups(arr, want)
-		if hasCurrent && !hookGroupHasSpec(kept, want, s) {
+		if hasCurrent && !codexHookGroupHasSpec(kept, want, wantWindows, s) {
 			kept = dropHookGroupCommand(kept, want)
 			hasCurrent = false
 			dropped = true
 		}
 		if hasCurrent && !dropped {
-			if s.event == "SessionStart" {
-				var dashboardChanged bool
-				kept, dashboardChanged = ensureCodexDashboardHook(kept, want, dashboard)
-				if dashboardChanged {
-					hooks[s.event] = kept
-					added = append(added, s.event)
-					changed = true
-					continue
-				}
-			}
 			skipped = append(skipped, s.event)
 			continue
 		}
 		if !hasCurrent {
 			handler := map[string]any{
-				"type": "command", "command": want, "commandWindows": want,
+				"type": "command", "command": want, "commandWindows": wantWindows,
 				"timeout": s.timeout, "statusMessage": "Loading ProjX",
 			}
-			handlers := []any{handler}
-			if s.event == "SessionStart" {
-				handlers = append(handlers, codexDashboardHandler(dashboard))
-			}
-			group := map[string]any{"hooks": handlers}
+			group := map[string]any{"hooks": []any{handler}}
 			if s.matcher != "" {
 				group["matcher"] = s.matcher
 			}
@@ -100,45 +86,24 @@ func mergeCodexHooks(path string) (added, skipped []string, err error) {
 	return added, skipped, nil
 }
 
-func codexDashboardHandler(command string) map[string]any {
-	return map[string]any{
-		"type": "command", "command": command, "commandWindows": command,
-		"timeout": 5, "statusMessage": "Starting ProjX dashboard",
+func codexHookGroupHasSpec(groups []any, command, commandWindows string, spec hookSpec) bool {
+	if !hookGroupHasSpec(groups, command, spec) {
+		return false
 	}
-}
-
-func ensureCodexDashboardHook(groups []any, hookCommand, dashboardCommand string) ([]any, bool) {
-	changed := false
 	for _, group := range groups {
 		gm, ok := group.(map[string]any)
-		if !ok || projxGroupCommand(group) != hookCommand {
+		if !ok || projxGroupCommand(group) != command {
 			continue
 		}
 		inner, _ := gm["hooks"].([]any)
-		kept := make([]any, 0, len(inner)+1)
-		have := false
-		for _, item := range inner {
-			hm, _ := item.(map[string]any)
-			cmd, _ := hm["command"].(string)
-			if strings.Contains(cmd, "status --ensure-server") {
-				if cmd == dashboardCommand && !have {
-					kept = append(kept, item)
-					have = true
-				} else {
-					changed = true
-				}
-				continue
-			}
-			kept = append(kept, item)
+		if len(inner) == 0 {
+			return false
 		}
-		if !have {
-			kept = append(kept, codexDashboardHandler(dashboardCommand))
-			changed = true
-		}
-		gm["hooks"] = kept
-		break
+		hm, _ := inner[0].(map[string]any)
+		got, _ := hm["commandWindows"].(string)
+		return got == commandWindows
 	}
-	return groups, changed
+	return false
 }
 
 func installCodexSkill(codexDir string) (path string, wrote bool, err error) {

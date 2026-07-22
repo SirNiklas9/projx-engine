@@ -24,8 +24,10 @@ Codex automatically. Its MCP server exposes deterministic pull tools.
 
 ## Codex GUI status dashboard
 
-The Codex-only `SessionStart` adapter emits an **Open ProjX dashboard** link for
-each new task. Other harnesses do not receive this presentation behavior.
+The Codex-only `SessionStart` adapter emits one visible system message with the
+live ProjX dashboard URL for each new task covered by a global, workspace, or
+project store. The lifecycle hook's knowledge output remains silent model
+context, and other harnesses do not receive this presentation behavior.
 
 When the user asks to show, open, refresh, or inspect the ProjX dashboard in
 Codex:
@@ -53,8 +55,9 @@ The skill owns setup and updates. On Windows it stages the paired interactive
 engine and `projx-engine-headless.exe` proxy beside one another; lifecycle hooks,
 MCP, and background status use the proxy so they never open console windows. It
 then runs global bootstrap; the engine copies both assets to an immutable path
-under `~/.codex/projx/bin/` and points Codex and Claude adapters at that exact
-path. Do not ask the user to install it, edit PATH, or replace a running binary.
+under the user's neutral ProjX home, typically `os.UserConfigDir()/projx/bin/`,
+and points Codex and Claude adapters at that exact path. Do not ask the user to
+install it, edit PATH, or replace a running binary.
 
 Global bootstrap is idempotent:
 

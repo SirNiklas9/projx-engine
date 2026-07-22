@@ -11,6 +11,7 @@ import (
 
 func TestProvisionManagedBinaryIsImmutableAndIdempotent(t *testing.T) {
 	home := t.TempDir()
+	t.Setenv("PROJX_YOURS_DIR", filepath.Join(home, "projx-home"))
 	rt, copied, err := provisionManagedRuntime(home)
 	if err != nil {
 		t.Fatal(err)
@@ -19,7 +20,7 @@ func TestProvisionManagedBinaryIsImmutableAndIdempotent(t *testing.T) {
 		t.Fatal("first provision did not copy")
 	}
 	first := rt.CLI
-	wantRoot := filepath.Join(home, ".codex", "projx", "bin")
+	wantRoot := filepath.Join(home, "projx-home", "bin")
 	rel, err := filepath.Rel(wantRoot, first)
 	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		t.Fatalf("managed path %q is outside %q", first, wantRoot)
@@ -64,20 +65,22 @@ func TestMCPBinaryPathUsesManagedBinaryNotEnvironment(t *testing.T) {
 	}
 }
 
-func TestBackgroundAdaptersUseHeadlessManagedBinary(t *testing.T) {
+func TestHooksUseCLIBinaryAndCodexUsesCombinedOutput(t *testing.T) {
 	oldCLI, oldHeadless := configuredBinary, configuredHeadlessBinary
 	configuredBinary = filepath.Join("managed", "projx-engine.exe")
 	configuredHeadlessBinary = filepath.Join("managed", "projx-engine-headless.exe")
 	t.Cleanup(func() { configuredBinary, configuredHeadlessBinary = oldCLI, oldHeadless })
-	want := "managed/projx-engine-headless.exe"
+	want := "managed/projx-engine.exe"
 	for name, command := range map[string]string{
 		"claude hook": projxHookCommand(),
 		"codex hook":  codexHookCommand(),
-		"dashboard":   codexDashboardCommand(),
 	} {
-		if !strings.Contains(command, want) || strings.Contains(command, `managed/projx-engine.exe"`) {
+		if !strings.Contains(command, want) || strings.Contains(command, `managed/projx-engine-headless.exe"`) {
 			t.Errorf("%s command uses wrong runtime: %s", name, command)
 		}
+	}
+	if command := codexHookCommand(); !strings.Contains(command, "hook --codex") {
+		t.Fatalf("Codex hook does not request combined structured output: %s", command)
 	}
 }
 
@@ -86,7 +89,9 @@ func TestActivateManagedBinaryConfiguresExactPath(t *testing.T) {
 	oldHeadless := configuredHeadlessBinary
 	configuredBinary = ""
 	t.Cleanup(func() { configuredBinary = old; configuredHeadlessBinary = oldHeadless })
-	t.Setenv("HOME", t.TempDir())
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PROJX_YOURS_DIR", filepath.Join(home, "projx-home"))
 	path, _, err := activateManagedBinary()
 	if err != nil {
 		t.Fatal(err)

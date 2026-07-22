@@ -13,7 +13,7 @@ package main
 //   2. Seeds the GLOBAL-scope floor (working-protocol + secrets-by-codename conventions,
 //      off-limits gate rules) if absent — idempotent.
 //   3. Installs the `projx` skill to ~/.claude/skills/projx/SKILL.md (embedded here).
-//   4. Activates this release beneath ~/.codex/projx/bin and prints a summary.
+//   4. Activates this release beneath the user's neutral ProjX home and prints a summary.
 //
 // Deterministic + idempotent: re-running never duplicates a hook, a floor record, or
 // re-writes an up-to-date skill. Releases are copied to immutable managed paths;
@@ -51,6 +51,13 @@ func selfBinaryPath() string {
 	return "projx-engine"
 }
 
+// hookBinaryPath is the output-sensitive entry point. Hooks and startup helpers
+// must return stdout back to the harness, so on Windows they use the real CLI
+// binary rather than the GUI-subsystem proxy.
+func hookBinaryPath() string {
+	return selfBinaryPath()
+}
+
 // backgroundBinaryPath is the harness-owned entry point. On Windows it uses a
 // GUI-subsystem PE so launching it never creates a transient console window.
 // Harnesses still supply stdin/stdout/stderr pipes, which Go inherits normally.
@@ -68,7 +75,7 @@ func backgroundBinaryPath() string {
 // forward-slash path as the default, quoted (spaces-safe), with a runtime PROJX_ENGINE_BIN
 // override. Result works with NO PATH configuration. isProjxHookCmd detects every variant.
 func projxHookCommand() string {
-	return `"${PROJX_ENGINE_BIN:-` + backgroundBinaryPath() + `}" hook`
+	return `"${PROJX_ENGINE_BIN:-` + hookBinaryPath() + `}" hook`
 }
 
 // isProjxHookCmd reports whether a hook command string is a ProjX lifecycle hook. It

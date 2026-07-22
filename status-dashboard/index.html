@@ -54,7 +54,7 @@
     .scope { margin-top: 5px; color: var(--muted); }
     .live { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: .88rem; }
     .pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 4px color-mix(in srgb, var(--ok) 16%, transparent); }
-    .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+    .grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
     .card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; box-shadow: var(--shadow); }
     .metric { padding: 18px; display: grid; gap: 4px; }
     .metric-label { color: var(--muted); font-size: .82rem; }
@@ -79,6 +79,9 @@
     .empty { padding: 18px 0 4px; color: var(--muted); text-align: center; }
     .error { color: var(--bad); }
     footer { color: var(--muted); font-size: .78rem; display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+    @media (max-width: 860px) {
+      .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
     @media (max-width: 700px) {
       main { width: min(100% - 20px, 1060px); margin: 18px auto; }
       .grid { grid-template-columns: 1fr; }
@@ -94,29 +97,30 @@
   <main>
     <header>
       <div class="brand">
-        <div class="mark" aria-hidden="true">◆</div>
+        <div class="mark" aria-hidden="true">&#9674;</div>
         <div>
           <h1>ProjX status</h1>
-          <p class="scope"><strong id="project">Connecting…</strong> <code id="root"></code></p>
+          <p class="scope"><strong id="project">Connecting...</strong> <code id="root"></code></p>
         </div>
       </div>
       <div class="live"><span class="pulse" aria-hidden="true"></span><span id="live-label">Connecting</span></div>
     </header>
 
     <section class="grid" aria-label="Knowledge metrics">
-      <article class="card metric"><span class="metric-label">Declared knowledge</span><strong class="metric-value" id="records">–</strong><span class="metric-detail">project records</span></article>
-      <article class="card metric"><span class="metric-label">Architecture</span><strong class="metric-value" id="adrs">–</strong><span class="metric-detail" id="adr-detail">ADRs</span></article>
-      <article class="card metric"><span class="metric-label">Protection</span><strong class="metric-value" id="gates">–</strong><span class="metric-detail">active gate rules</span></article>
+      <article class="card metric"><span class="metric-label">Active scope</span><strong class="metric-value" id="primary-scope">-</strong><span class="metric-detail" id="scope-detail">Checking active ProjX scope</span></article>
+      <article class="card metric"><span class="metric-label">Declared knowledge</span><strong class="metric-value" id="records">-</strong><span class="metric-detail">project records</span></article>
+      <article class="card metric"><span class="metric-label">Architecture</span><strong class="metric-value" id="adrs">-</strong><span class="metric-detail" id="adr-detail">ADRs</span></article>
+      <article class="card metric"><span class="metric-label">Protection</span><strong class="metric-value" id="gates">-</strong><span class="metric-detail">active gate rules</span></article>
     </section>
 
     <section class="card panel" aria-labelledby="health-heading">
       <h2 id="health-heading">Integration health</h2>
       <div class="health" id="health"></div>
       <div class="facts">
-        <div class="fact"><span>Active mode</span><strong id="modes">–</strong></div>
-        <div class="fact"><span>Last action</span><strong id="action">–</strong></div>
-        <div class="fact"><span>Context injected</span><strong id="context">–</strong></div>
-        <div class="fact"><span>Verification</span><strong id="verification">–</strong></div>
+        <div class="fact"><span>Active mode</span><strong id="modes">-</strong></div>
+        <div class="fact"><span>Last action</span><strong id="action">-</strong></div>
+        <div class="fact"><span>Context injected</span><strong id="context">-</strong></div>
+        <div class="fact"><span>Verification</span><strong id="verification">-</strong></div>
       </div>
     </section>
 
@@ -144,6 +148,11 @@
       if (!n) return 'none';
       if (n < 1024) return `${n} B`;
       return `${(n / 1024).toFixed(1)} kB`;
+    }
+
+    function titleCaseScope(scope) {
+      if (!scope) return 'Global';
+      return scope.charAt(0).toUpperCase() + scope.slice(1);
     }
 
     function renderHealth(health) {
@@ -192,6 +201,14 @@
     function render(snapshot) {
       text('project', snapshot.project_name || 'Global floor');
       text('root', snapshot.active_root || '');
+      text('primary-scope', titleCaseScope(snapshot.primary_scope));
+      const activeScopes = Array.isArray(snapshot.active_scopes) && snapshot.active_scopes.length
+        ? snapshot.active_scopes.map(titleCaseScope).join(' -> ')
+        : 'Global';
+      const scopeDetail = snapshot.workspace_root
+        ? `${activeScopes} -> workspace ${snapshot.workspace_root}`
+        : activeScopes;
+      text('scope-detail', scopeDetail);
       text('records', snapshot.record_count);
       text('adrs', snapshot.adr_count);
       text('gates', snapshot.gate_count);
@@ -199,7 +216,7 @@
       if (snapshot.review_due_count) lifecycle.push(`${snapshot.review_due_count} review due`);
       if (snapshot.candidate_count) lifecycle.push(`${snapshot.candidate_count} candidate`);
       if (snapshot.superseded_count) lifecycle.push(`${snapshot.superseded_count} superseded`);
-      text('adr-detail', lifecycle.length ? lifecycle.join(' · ') : `ADRs · current · ${snapshot.adr_age_days || 0}d`);
+      text('adr-detail', lifecycle.length ? lifecycle.join(' | ') : `ADRs | current | ${snapshot.adr_age_days || 0}d`);
       const modes = Object.entries(snapshot.modes).filter(([, on]) => on).map(([name]) => name.replaceAll('_', ' '));
       text('modes', modes.length ? modes.join(', ') : 'normal');
       text('action', snapshot.last_action || 'none');

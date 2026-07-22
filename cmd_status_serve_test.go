@@ -24,8 +24,48 @@ func TestStatusDashboardLinkIsMarkdown(t *testing.T) {
 	if got := statusDashboardLink("http://127.0.0.1:47632"); got != "[Open ProjX dashboard](http://127.0.0.1:47632/)" {
 		t.Fatalf("link = %q", got)
 	}
-	if !statusLinkRequested([]string{"--ensure-server", "--link"}) || statusLinkRequested([]string{"--ensure-server"}) {
+	if !statusLinkRequested([]string{"--ensure-server", "--link"}) || !statusLinkRequested([]string{"--ensure-server", "--link-if-relevant"}) || statusLinkRequested([]string{"--ensure-server"}) {
 		t.Fatal("--link detection is not adapter-specific")
+	}
+}
+
+func TestRequestedStatusDashboardLinkForProjXContext(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".projx"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	want := "[Open ProjX dashboard](http://127.0.0.1:47632/)"
+	if got := requestedStatusDashboardLink(root, []string{"--ensure-server", "--link-if-relevant"}, "http://127.0.0.1:47632"); got != want {
+		t.Fatalf("relevant link = %q, want %q", got, want)
+	}
+}
+
+func TestRequestedCodexSystemMessageForProjXContext(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".projx"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"--ensure-server", "--codex-system-message-if-relevant"}
+	output := requestedStatusDashboardOutput(root, args, "http://127.0.0.1:47632")
+	var payload map[string]string
+	if err := json.Unmarshal([]byte(output), &payload); err != nil {
+		t.Fatalf("systemMessage output is not JSON: %q: %v", output, err)
+	}
+	if got := payload["systemMessage"]; got != "ProjX live status: http://127.0.0.1:47632/" {
+		t.Fatalf("systemMessage = %q", got)
+	}
+}
+
+func TestStatusDashboardIsRelevantWithGlobalStore(t *testing.T) {
+	globalRoot := t.TempDir()
+	t.Setenv("PROJX_YOURS_DIR", globalRoot)
+	globalStore, err := openYoursStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	globalStore.Close()
+	if got := globalStatusRoot(); got != globalRoot {
+		t.Fatalf("global status root = %q, want %q", got, globalRoot)
 	}
 }
 

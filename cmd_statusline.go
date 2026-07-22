@@ -456,9 +456,10 @@ func dispatchBadge(root string) string {
 }
 
 // nearestProjxDir returns the nearest ancestor of dir (dir inclusive) that owns a
-// .projx directory, or "" if none. Reuses targetStoreRoot by handing it a path
-// INSIDE dir so it checks dir/.projx first; targetStoreRoot falls back to its first
-// arg when it finds nothing, so we verify the result actually is a project.
+// real ProjX PROJECT store (.projx/store.db), or "" if none. Reuses targetStoreRoot
+// by handing it a path INSIDE dir so it checks dir/.projx first; targetStoreRoot
+// falls back to its first arg when it finds nothing, so we verify the result
+// actually is a project.
 func nearestProjxDir(dir string) string {
 	root := targetStoreRoot(dir, filepath.Join(dir, "_"))
 	if isProjxDir(root) {
@@ -467,14 +468,15 @@ func nearestProjxDir(dir string) string {
 	return ""
 }
 
-// isProjxDir reports whether path contains a .projx directory (i.e. is a ProjX
-// project root).
+// isProjxDir reports whether path contains a real project store
+// (.projx/store.db). A workspace root may still own a .projx runtime directory for
+// routing/cage metadata; that alone must NOT make it a project.
 func isProjxDir(path string) bool {
 	if path == "" {
 		return false
 	}
-	fi, err := os.Stat(filepath.Join(path, ".projx"))
-	return err == nil && fi.IsDir()
+	fi, err := os.Stat(filepath.Join(path, ".projx", "store.db"))
+	return err == nil && !fi.IsDir()
 }
 
 // statusCrumb is the tiny breadcrumb the hook writes after each event so the status

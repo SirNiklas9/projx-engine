@@ -17,9 +17,10 @@ one-line anchor jump instead of a 25-file grep.
 
 Add the ProjX skill/plugin and ask the AI to enable ProjX. The skill downloads the
 matching prebuilt release to a temporary location and invokes `init --global`. The
-engine places itself at an immutable, content-addressed location beneath
-`~/.codex/projx/bin/` and configures Codex and Claude to use that exact binary. It
-does not require PATH edits, an installer script, or replacement of a running process.
+engine places itself at an immutable, content-addressed location beneath the
+user's neutral ProjX home, typically `os.UserConfigDir()/projx/bin/`, and
+configures Codex and Claude to use that exact binary. It does not require PATH
+edits, an installer script, or replacement of a running process.
 
 **Or install as a Claude Code plugin:**
 ```

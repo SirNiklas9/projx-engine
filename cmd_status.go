@@ -88,11 +88,11 @@ func runStatusCmd(absRoot string, args []string) {
 	}
 
 	// ── current project ──────────────────────────────────────────────────────
-	if _, err := os.Stat(filepath.Join(absRoot, ".projx")); err != nil {
+	if !isProjxDir(absRoot) {
 		fmt.Printf("\nProject: not a ProjX project here (%s)\n  run `projx-engine --root . init` to enable\n", absRoot)
 		return
 	}
-	st, err := openStoreSafe(absRoot)
+	st, err := openStoreExistingSafe(absRoot)
 	if err != nil {
 		fmt.Printf("\nProject (%s): store unavailable (%v)\n", absRoot, err)
 		return

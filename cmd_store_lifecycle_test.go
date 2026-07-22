@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -40,5 +41,40 @@ func TestStoreCommitLifecycleDefaultsAndMetadata(t *testing.T) {
 	st.Close()
 	if !ok || approved.LifecycleStatus() != store.StatusActive || !approved.Authoritative() {
 		t.Fatalf("human record should be active: %+v, found=%v", approved, ok)
+	}
+}
+
+func TestOpenStoreExistingSafeDoesNotCreateProjectStore(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("PROJX_YOURS_DIR", filepath.Join(t.TempDir(), "yours"))
+	if err := os.MkdirAll(filepath.Join(root, ".projx-workspace"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ws, err := store.Open(filepath.Join(root, ".projx-workspace", "store.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ws.Put(store.Record{
+		ID:    "doc/workspace-root",
+		Kind:  store.KDoc,
+		Scope: store.ScopeWorkspace,
+		Key:   "workspace/root",
+		Body:  "workspace root",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ws.Close()
+
+	st, err := openStoreExistingSafe(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(st.List(store.InScope(store.ScopeWorkspace))); got != 1 {
+		t.Fatalf("workspace records = %d, want 1", got)
+	}
+	st.Close()
+
+	if hasProjectStore(root) {
+		t.Fatalf("openStoreExistingSafe created %s", filepath.Join(root, ".projx", "store.db"))
 	}
 }

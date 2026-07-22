@@ -161,7 +161,7 @@ func uniqueHookPaths(in []string) []string {
 }
 
 // runHookCmd reads the hook JSON from stdin, dispatches, and exits with the right code.
-func runHookCmd(absRoot string, _ []string) {
+func runHookCmd(absRoot string, args []string) {
 	// PROJX_AGENT_CONTEXT=1 (restricted mode, set inside a caged agent run) would refuse
 	// the engine ops the hooks need; the connector always ran with it unset, so do the same.
 	_ = os.Unsetenv("PROJX_AGENT_CONTEXT")
@@ -207,6 +207,9 @@ func runHookCmd(absRoot string, _ []string) {
 			}
 		}
 	}
+	if codexHookRequested(args) {
+		stdout = codexHookOutput(hookRoot(absRoot, data), data, stdout)
+	}
 	if stdout != "" {
 		fmt.Print(stdout)
 	}
@@ -214,6 +217,34 @@ func runHookCmd(absRoot string, _ []string) {
 		fmt.Fprintln(os.Stderr, stderr)
 	}
 	os.Exit(code)
+}
+
+func codexHookRequested(args []string) bool {
+	for _, arg := range args {
+		if arg == "--codex" {
+			return true
+		}
+	}
+	return false
+}
+
+func codexHookOutput(absRoot string, input []byte, context string) string {
+	ev := decodeLifecycleEvent(input)
+	if ev.Event != "SessionStart" {
+		return context
+	}
+	payload := map[string]any{
+		"hookSpecificOutput": map[string]string{
+			"hookEventName":     "SessionStart",
+			"additionalContext": context,
+		},
+	}
+	if statusLinkRoot(absRoot) != "" {
+		_ = ensureStatusServer(absRoot, []string{"--session", ev.SessionID}, false)
+		payload["systemMessage"] = "ProjX live status: http://" + statusDashboardAddr + "/"
+	}
+	out, _ := json.Marshal(payload)
+	return string(out)
 }
 
 func lastTargetRoot(absRoot string, targets []string) string {
@@ -262,7 +293,10 @@ func handleHook(absRoot string, input []byte) (stdout, stderr string, code int) 
 	// immediately, no recompile.
 	frame := func(ctx string) string {
 		if ctx != "" && os.Getenv("PROJX_ROLE") == "worker" {
-			wst := openStore(absRoot)
+			wst, err := openStoreExistingSafe(absRoot)
+			if err != nil {
+				return ctx
+			}
 			wd := store.WorkerDirectiveText(wst)
 			wst.Close()
 			return wd + ctx
@@ -272,8 +306,8 @@ func handleHook(absRoot string, input []byte) (stdout, stderr string, code int) 
 
 	switch ev.Event {
 	case "SessionStart":
-		// Refresh the code map (silently), then inject the lean floor. A background
-		// dispatch that finished since last session surfaces here, once.
+		// Refresh the code map (silently), then inject the lean floor. Codex owns
+		// dashboard presentation in its separate systemMessage hook.
 		_, _, _, _ = syncMap(absRoot, nil)
 		ctx := reconciliationPrompt(absRoot) + buildSessionContext(absRoot, sid, "", false)
 		markGovernedRecall(absRoot, sid, "")
@@ -332,7 +366,7 @@ func handleHook(absRoot string, input []byte) (stdout, stderr string, code int) 
 		// non-fatally. If it can't open, we BLOCK (exit 2) instead of crashing with exit 1
 		// — which Claude Code treats as non-blocking, i.e. silently fail-open. The safety
 		// floor must deny when it cannot prove the action is allowed.
-		st, err := openStoreSafe(storeRoot)
+		st, err := openStoreExistingSafe(storeRoot)
 		if err != nil {
 			return "", fmt.Sprintf("ProjX gate: store unavailable (%v) — failing closed, action blocked.", err), 2
 		}
@@ -388,7 +422,7 @@ func handleHook(absRoot string, input []byte) (stdout, stderr string, code int) 
 				}
 				continue
 			}
-			targetStore, err := openStoreSafe(targetRoot)
+			targetStore, err := openStoreExistingSafe(targetRoot)
 			if err != nil {
 				return "", fmt.Sprintf("ProjX gate: store unavailable (%v) - failing closed, action blocked.", err), 2
 			}

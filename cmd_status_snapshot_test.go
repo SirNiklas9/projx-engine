@@ -46,7 +46,9 @@ func TestClaudeStatuslineGoldenProjectAndCrumbs(t *testing.T) {
 }
 
 func TestStatusSnapshotShowsFloatingScope(t *testing.T) {
-	home, active := filepath.Join(t.TempDir(), "home"), filepath.Join(t.TempDir(), "active")
+	base := t.TempDir()
+	workspace := filepath.Join(base, "workspace")
+	home, active := filepath.Join(base, "home"), filepath.Join(workspace, "active")
 	t.Setenv("PROJX_YOURS_DIR", filepath.Join(t.TempDir(), "yours"))
 	for _, root := range []string{home, active} {
 		if err := os.MkdirAll(filepath.Join(root, ".projx"), 0o755); err != nil {
@@ -58,6 +60,9 @@ func TestStatusSnapshotShowsFloatingScope(t *testing.T) {
 		}
 		st.Close()
 	}
+	if err := os.MkdirAll(filepath.Join(workspace, ".projx-workspace"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	updateCrumb(home, "float", func(c *statusCrumb) { c.R = active; c.A = "ctx"; c.N = 42 })
 	s := buildStatusSnapshot(home, "float")
 	if s.ActiveRoot != active || s.ProjectName != filepath.Base(active) {
@@ -65,6 +70,21 @@ func TestStatusSnapshotShowsFloatingScope(t *testing.T) {
 	}
 	if s.LastAction != "ctx" || s.ContextBytes != 42 {
 		t.Fatalf("crumb missing: %#v", s)
+	}
+	if s.PrimaryScope != "project" {
+		t.Fatalf("primary scope = %q, want project", s.PrimaryScope)
+	}
+	wantScopes := []string{"global", "workspace", "project"}
+	if len(s.ActiveScopes) != len(wantScopes) {
+		t.Fatalf("active scopes = %v, want %v", s.ActiveScopes, wantScopes)
+	}
+	for i := range wantScopes {
+		if s.ActiveScopes[i] != wantScopes[i] {
+			t.Fatalf("active scopes = %v, want %v", s.ActiveScopes, wantScopes)
+		}
+	}
+	if s.WorkspaceRoot != workspace {
+		t.Fatalf("workspace root = %q, want %q", s.WorkspaceRoot, workspace)
 	}
 }
 
@@ -134,6 +154,12 @@ func TestMCPStatusSnapshotReturnsStructuredContent(t *testing.T) {
 	snapshot, ok := result["structuredContent"].(StatusSnapshot)
 	if !ok || snapshot.ActiveRoot != root || !snapshot.Project {
 		t.Fatalf("structured snapshot = %#v", result["structuredContent"])
+	}
+	if snapshot.PrimaryScope != "project" {
+		t.Fatalf("primary scope = %q, want project", snapshot.PrimaryScope)
+	}
+	if len(snapshot.ActiveScopes) != 2 || snapshot.ActiveScopes[0] != "global" || snapshot.ActiveScopes[1] != "project" {
+		t.Fatalf("active scopes = %#v", snapshot.ActiveScopes)
 	}
 }
 

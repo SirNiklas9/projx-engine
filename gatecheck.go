@@ -127,13 +127,14 @@ func bashHitsGate(s store.Store, storeRoot, absRoot, cmd string) (token, pattern
 
 // targetStoreRoot resolves WHICH project's store governs an operation on path —
 // TARGET-based, not cwd-based (adr/scope-resolution-is-target-based). It walks UP from
-// the file being touched to the nearest ancestor directory that owns a ".projx"
-// directory and returns that directory. So enforcement follows WHAT is being edited:
-// an edit to a file inside project X fires X's project rules even when Claude runs from
-// a different repo's cwd. Falls back to the cwd-resolved root (absRoot) when path is
-// empty (a session-level event) or when no .projx ancestor exists (a loose file under
-// the workspace, or outside any project). The GLOBAL floor still applies regardless —
-// openStore always composes the per-user store on top of whichever project this returns.
+// the file being touched to the nearest ancestor directory that owns a real project
+// store (.projx/store.db) and returns that directory. So enforcement follows WHAT is
+// being edited: an edit to a file inside project X fires X's project rules even when
+// Claude runs from a different repo's cwd. Falls back to the cwd-resolved root
+// (absRoot) when path is empty (a session-level event) or when no project-store
+// ancestor exists (a loose file under the workspace, or outside any project). The
+// GLOBAL floor still applies regardless — openStore always composes the per-user
+// store on top of whichever project this returns.
 func targetStoreRoot(absRoot, path string) string {
 	path = strings.TrimSpace(path)
 	if path == "" {
@@ -143,10 +144,10 @@ func targetStoreRoot(absRoot, path string) string {
 	if !filepath.IsAbs(abs) {
 		abs = filepath.Join(absRoot, path)
 	}
-	// Walk up from the file's own directory looking for a .projx dir (its owning project).
+	// Walk up from the file's own directory looking for a real project store.
 	dir := filepath.Dir(abs)
 	for i := 0; i < 64; i++ {
-		if fi, err := os.Stat(filepath.Join(dir, ".projx")); err == nil && fi.IsDir() {
+		if fi, err := os.Stat(filepath.Join(dir, ".projx", "store.db")); err == nil && !fi.IsDir() {
 			return dir
 		}
 		parent := filepath.Dir(dir)

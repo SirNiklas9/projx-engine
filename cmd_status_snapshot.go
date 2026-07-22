@@ -55,6 +55,9 @@ type StatusSnapshot struct {
 	GeneratedAt     time.Time     `json:"generated_at"`
 	ActiveRoot      string        `json:"active_root,omitempty"`
 	ProjectName     string        `json:"project_name,omitempty"`
+	PrimaryScope    string        `json:"primary_scope"`
+	ActiveScopes    []string      `json:"active_scopes"`
+	WorkspaceRoot   string        `json:"workspace_root,omitempty"`
 	Project         bool          `json:"project"`
 	RecordCount     int           `json:"record_count"`
 	CandidateCount  int           `json:"candidate_count"`
@@ -80,7 +83,13 @@ type StatusSnapshot struct {
 }
 
 func buildStatusSnapshot(cwd, sid string) StatusSnapshot {
-	s := StatusSnapshot{GeneratedAt: time.Now(), Agents: []StatusAgent{}, Verification: "not-run"}
+	s := StatusSnapshot{
+		GeneratedAt:  time.Now(),
+		PrimaryScope: "global",
+		ActiveScopes: []string{"global"},
+		Agents:       []StatusAgent{},
+		Verification: "not-run",
+	}
 	if p, err := os.Executable(); err == nil {
 		s.Health.BinaryPath = filepath.Clean(p)
 		_, err = os.Stat(p)
@@ -113,12 +122,21 @@ func buildStatusSnapshot(cwd, sid string) StatusSnapshot {
 		s.ActiveRoot = s.crumb.R
 	}
 	s.Project = s.ActiveRoot != "" && isProjxDir(s.ActiveRoot)
+	if s.Project {
+		s.PrimaryScope = "project"
+		if wp := workspaceStorePath(s.ActiveRoot); wp != "" {
+			s.WorkspaceRoot = filepath.Dir(filepath.Dir(wp))
+			s.ActiveScopes = []string{"global", "workspace", "project"}
+		} else {
+			s.ActiveScopes = []string{"global", "project"}
+		}
+	}
 	if !s.Project {
 		return s
 	}
 	s.ProjectName = filepath.Base(s.ActiveRoot)
 	s.LastAction, s.ContextBytes = s.crumb.A, s.crumb.N
-	st, err := openStoreSafe(s.ActiveRoot)
+	st, err := openStoreExistingSafe(s.ActiveRoot)
 	if err != nil {
 		s.storeErr = err.Error()
 		return s
@@ -346,7 +364,8 @@ func renderStatusCompact(s StatusSnapshot) string {
 	if !s.Project {
 		return "projx global floor"
 	}
-	parts := []string{"projx", s.ProjectName, fmt.Sprintf("%d rec", s.RecordCount), fmt.Sprintf("%d gates", s.GateCount), fmt.Sprintf("%d agents", len(s.Agents))}
+	scope := strings.Join(s.ActiveScopes, " -> ")
+	parts := []string{"projx", s.ProjectName, scope, fmt.Sprintf("%d rec", s.RecordCount), fmt.Sprintf("%d gates", s.GateCount), fmt.Sprintf("%d agents", len(s.Agents))}
 	if s.CandidateCount > 0 {
 		parts = append(parts, fmt.Sprintf("%d candidate", s.CandidateCount))
 	}

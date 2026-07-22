@@ -18,7 +18,12 @@ type managedRuntime struct {
 	Headless string
 }
 
-func managedBinaryRoot(home string) string { return filepath.Join(home, ".codex", "projx", "bin") }
+func managedBinaryRoot(home string) string {
+	if dir := yoursDir(); dir != "" {
+		return filepath.Join(dir, "bin")
+	}
+	return filepath.Join(home, ".projx", "bin")
+}
 
 func activateManagedBinary() (string, bool, error) {
 	home, err := claudeHomeDir()
