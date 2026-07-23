@@ -60,6 +60,9 @@ type StatusSnapshot struct {
 	WorkspaceRoot   string        `json:"workspace_root,omitempty"`
 	Project         bool          `json:"project"`
 	RecordCount     int           `json:"record_count"`
+	GlobalRecords   int           `json:"global_records"`
+	WorkspaceRecords int          `json:"workspace_records"`
+	ProjectRecords  int           `json:"project_records"`
 	CandidateCount  int           `json:"candidate_count"`
 	ReviewDueCount  int           `json:"review_due_count"`
 	SupersededCount int           `json:"superseded_count"`
@@ -114,10 +117,20 @@ func buildStatusSnapshot(cwd, sid string) StatusSnapshot {
 		s.Health.HooksCurrent = commandsUseBinary(hookCommands, s.Health.BinaryPath)
 	}
 	s.home = nearestProjxDir(cwd)
+	if s.home == "" {
+		if wp := workspaceStorePath(cwd); wp != "" {
+			s.ActiveRoot = filepath.Dir(filepath.Dir(wp))
+			s.PrimaryScope = "workspace"
+			s.ActiveScopes = []string{"global", "workspace"}
+			s.WorkspaceRoot = s.ActiveRoot
+		}
+	}
 	if sid != "" && s.home != "" {
 		s.crumb, s.haveCrumb = readStatusCrumb(s.home, sid)
 	}
-	s.ActiveRoot = s.home
+	if s.ActiveRoot == "" {
+		s.ActiveRoot = s.home
+	}
 	if s.haveCrumb && s.crumb.R != "" && isProjxDir(s.crumb.R) {
 		s.ActiveRoot = s.crumb.R
 	}
@@ -131,12 +144,15 @@ func buildStatusSnapshot(cwd, sid string) StatusSnapshot {
 			s.ActiveScopes = []string{"global", "project"}
 		}
 	}
-	if !s.Project {
-		return s
+	storeRoot := s.ActiveRoot
+	if storeRoot == "" {
+		storeRoot = cwd
 	}
-	s.ProjectName = filepath.Base(s.ActiveRoot)
+	if s.Project {
+		s.ProjectName = filepath.Base(s.ActiveRoot)
+	}
 	s.LastAction, s.ContextBytes = s.crumb.A, s.crumb.N
-	st, err := openStoreExistingSafe(s.ActiveRoot)
+	st, err := openStoreExistingSafe(storeRoot)
 	if err != nil {
 		s.storeErr = err.Error()
 		return s
@@ -145,9 +161,16 @@ func buildStatusSnapshot(cwd, sid string) StatusSnapshot {
 	s.Health.Store = true
 	projectFilter := store.InScope(store.ScopeProject)
 	projectFilter.IncludeNonAuthoritative = true
+	workspaceFilter := store.InScope(store.ScopeWorkspace)
+	workspaceFilter.IncludeNonAuthoritative = true
+	globalFilter := store.InScope(store.ScopeGlobal)
+	globalFilter.IncludeNonAuthoritative = true
 	nowMillis := s.GeneratedAt.UnixMilli()
 	s.ADRFresh = true
-	for _, r := range st.List(projectFilter) {
+	all := append([]store.Record{}, st.List(globalFilter)...)
+	all = append(all, st.List(workspaceFilter)...)
+	all = append(all, st.List(projectFilter)...)
+	for _, r := range all {
 		switch r.LifecycleStatus() {
 		case store.StatusCandidate:
 			s.CandidateCount++
@@ -164,6 +187,14 @@ func buildStatusSnapshot(cwd, sid string) StatusSnapshot {
 		}
 		if r.Kind != store.KDeclaredStructure {
 			s.RecordCount++
+			switch r.Scope {
+			case store.ScopeGlobal:
+				s.GlobalRecords++
+			case store.ScopeWorkspace:
+				s.WorkspaceRecords++
+			case store.ScopeProject:
+				s.ProjectRecords++
+			}
 		}
 		if r.Kind == store.KGateRule {
 			s.GateCount++

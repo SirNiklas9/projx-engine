@@ -108,7 +108,7 @@
 
     <section class="grid" aria-label="Knowledge metrics">
       <article class="card metric"><span class="metric-label">Active scope</span><strong class="metric-value" id="primary-scope">-</strong><span class="metric-detail" id="scope-detail">Checking active ProjX scope</span></article>
-      <article class="card metric"><span class="metric-label">Declared knowledge</span><strong class="metric-value" id="records">-</strong><span class="metric-detail">project records</span></article>
+      <article class="card metric"><span class="metric-label">Declared knowledge</span><strong class="metric-value" id="records">-</strong><span class="metric-detail" id="record-detail">total records</span></article>
       <article class="card metric"><span class="metric-label">Architecture</span><strong class="metric-value" id="adrs">-</strong><span class="metric-detail" id="adr-detail">ADRs</span></article>
       <article class="card metric"><span class="metric-label">Protection</span><strong class="metric-value" id="gates">-</strong><span class="metric-detail">active gate rules</span></article>
     </section>
@@ -205,11 +205,14 @@
       const activeScopes = Array.isArray(snapshot.active_scopes) && snapshot.active_scopes.length
         ? snapshot.active_scopes.map(titleCaseScope).join(' -> ')
         : 'Global';
-      const scopeDetail = snapshot.workspace_root
-        ? `${activeScopes} -> workspace ${snapshot.workspace_root}`
-        : activeScopes;
-      text('scope-detail', scopeDetail);
+      text('scope-detail', activeScopes);
       text('records', snapshot.record_count);
+      const recordBreakout = [
+        `global ${snapshot.global_records || 0}`,
+        `workspace ${snapshot.workspace_records || 0}`,
+        `project ${snapshot.project_records || 0}`
+      ].join(' | ');
+      text('record-detail', recordBreakout);
       text('adrs', snapshot.adr_count);
       text('gates', snapshot.gate_count);
       const lifecycle = [];
