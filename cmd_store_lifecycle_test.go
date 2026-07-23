@@ -78,3 +78,58 @@ func TestOpenStoreExistingSafeDoesNotCreateProjectStore(t *testing.T) {
 		t.Fatalf("openStoreExistingSafe created %s", filepath.Join(root, ".projx", "store.db"))
 	}
 }
+
+func TestSeedWorkspaceFloorIsIdempotent(t *testing.T) {
+	root := t.TempDir()
+	marker := filepath.Join(root, ".projx-workspace")
+	if err := os.MkdirAll(marker, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ws, err := store.Open(filepath.Join(marker, "store.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ws.Close()
+
+	seeded, present, err := seedWorkspaceFloor(ws, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := len(workspaceFloorConventions) + len(workspaceFloorDocs)
+	if len(seeded) != want {
+		t.Fatalf("first seed wrote %d record(s); want %d", len(seeded), want)
+	}
+	if len(present) != 0 {
+		t.Fatalf("first seed reported already-present = %v; want none", present)
+	}
+
+	for _, id := range []string{
+		"convention/workspace-shared-rules-live-here",
+		"convention/workspace-before-project-duplication",
+		"convention/scope-placement",
+		"convention/workspace-shared-gates-belong-here",
+		"convention/workspace-routing-defaults",
+		"convention/workspace-commit-durable-cross-repo-facts",
+		"doc/workspace-root",
+		"doc/workspace-member-repos",
+	} {
+		rec, ok := ws.Get(id)
+		if !ok {
+			t.Fatalf("workspace floor record %q missing", id)
+		}
+		if rec.Scope != store.ScopeWorkspace {
+			t.Fatalf("record %q scope = %v; want workspace", id, rec.Scope)
+		}
+	}
+
+	seeded2, present2, err := seedWorkspaceFloor(ws, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(seeded2) != 0 {
+		t.Fatalf("second seed wrote %v; want nothing", seeded2)
+	}
+	if len(present2) != want {
+		t.Fatalf("second seed reported %d already-present; want %d", len(present2), want)
+	}
+}
