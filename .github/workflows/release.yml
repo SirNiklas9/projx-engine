@@ -28,9 +28,6 @@ jobs:
             local repo="$2"
             git clone --depth 1 "https://x-access-token:${GH_CLONE_TOKEN}@github.com/${owner}/${repo}.git" "$repo"
           }
-          for repo in projx-core projx-store projx-verify; do
-            clone_with_token "SirNiklas9" "$repo"
-          done
           clone_with_token "BananaLabs-OSS" "Pulp"
       - name: Set up Go
         uses: actions/setup-go@v5

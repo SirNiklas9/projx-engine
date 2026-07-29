@@ -27,7 +27,6 @@ jobs:
           clone_repo() {
             [ -d "$1/.git" ] || git clone --depth 1 "https://x-access-token:${GH_CLONE_TOKEN}@github.com/$2/$1.git" "$1"
           }
-          for repo in projx-core projx-store projx-verify; do clone_repo "$repo" SirNiklas9; done
           clone_repo Pulp BananaLabs-OSS
       - uses: actions/setup-go@v5
         with:

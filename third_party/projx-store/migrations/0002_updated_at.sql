@@ -1,0 +1,2 @@
+-- +sow up
+ALTER TABLE records ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0;

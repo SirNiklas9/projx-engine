@@ -1,0 +1,10 @@
+{
+  "migrations": [
+    "0001_records.sql",
+    "0002_updated_at.sql",
+    "0003_origin.sql",
+    "0004_enforcement.sql",
+    "0005_provenance.sql",
+    "0006_knowledge_lifecycle.sql"
+  ]
+}

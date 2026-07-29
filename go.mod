@@ -47,11 +47,11 @@ require (
 	modernc.org/sqlite v1.52.0 // indirect
 )
 
-replace github.com/SirNiklas9/projx-core => ../projx-core
+replace github.com/SirNiklas9/projx-core => ./third_party/projx-core
 
-replace github.com/SirNiklas9/projx-store => ../projx-store
+replace github.com/SirNiklas9/projx-store => ./third_party/projx-store
 
-replace github.com/SirNiklas9/projx-verify => ../projx-verify
+replace github.com/SirNiklas9/projx-verify => ./third_party/projx-verify
 
 replace github.com/BananaLabs-OSS/Pulp-ext-confine => ./third_party/Pulp-ext-confine
 
