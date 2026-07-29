@@ -141,14 +141,22 @@ func TestCleanupOnlyRemovesOldIncompleteManagedArtifacts(t *testing.T) {
 		cli += ".exe"
 		headless += "-headless.exe"
 	}
-	for _, path := range []string{filepath.Join(complete, cli), filepath.Join(complete, headless), filepath.Join(incomplete, cli)} {
+	paths := []string{filepath.Join(complete, cli), filepath.Join(complete, headless)}
+	if runtime.GOOS == "windows" {
+		paths = append(paths, filepath.Join(incomplete, cli))
+	}
+	for _, path := range paths {
 		if err := os.WriteFile(path, []byte("x"), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
 	old := time.Now().Add(-48 * time.Hour)
-	_ = os.Chtimes(complete, old, old)
-	_ = os.Chtimes(incomplete, old, old)
+	if err := os.Chtimes(complete, old, old); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(incomplete, old, old); err != nil {
+		t.Fatal(err)
+	}
 	stale, err := cleanupStaleManagedArtifacts(home, true)
 	if err != nil {
 		t.Fatal(err)

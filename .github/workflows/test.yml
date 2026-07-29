@@ -40,3 +40,7 @@ jobs:
       - name: Run deterministic routing/catalog tests
         shell: bash
         run: go test ./internal/routing -count=1
+      - name: Run full suite on Linux
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: go test ./... -count=1

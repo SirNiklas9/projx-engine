@@ -287,14 +287,19 @@ func TestAgentRunInvokesCodexAdapterWithSelectedProfile(t *testing.T) {
 }
 
 func TestPrependProviderRuntimePathPreservesOnlyProviderAndJail(t *testing.T) {
-	env := prependProviderRuntimePath([]string{"PATH=C:\\repo\\.projx\\jail", "OTHER=value"}, `C:\Codex\bin\codex.exe`)
+	providerDir := filepath.Join(t.TempDir(), "Codex", "bin")
+	jailDir := filepath.Join(t.TempDir(), ".projx", "jail")
+	env := prependProviderRuntimePath(
+		[]string{"PATH=" + jailDir, "OTHER=value"},
+		filepath.Join(providerDir, "codex"),
+	)
 	var path string
 	for _, kv := range env {
 		if strings.HasPrefix(strings.ToUpper(kv), "PATH=") {
 			path = kv
 		}
 	}
-	want := "PATH=C:\\Codex\\bin" + string(os.PathListSeparator) + "C:\\repo\\.projx\\jail"
+	want := "PATH=" + providerDir + string(os.PathListSeparator) + jailDir
 	if path != want {
 		t.Fatalf("provider runtime PATH = %q, want %q", path, want)
 	}
