@@ -20,7 +20,7 @@ jobs:
       - name: Check out local-replace dependencies
         shell: bash
         env:
-          GH_CLONE_TOKEN: ${{ github.token }}
+          GH_CLONE_TOKEN: ${{ secrets.PROJX_RELEASE_TOKEN != '' && secrets.PROJX_RELEASE_TOKEN || github.token }}
         run: |
           set -euo pipefail
           cd "$GITHUB_WORKSPACE/.."
