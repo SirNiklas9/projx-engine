@@ -179,7 +179,7 @@ func cherryPickRevision(root string, st store.Store, targetSeq int) (storeRevisi
 	return newRev, nil
 }
 
-// checkoutState replays revisions 1..uptoSeq in order into an in-memory store
+// checkoutState replays revisions 1..upToSeq in order into an in-memory store
 // and returns the resulting records. This is READ-ONLY — it never touches the
 // real store on disk.
 //
@@ -187,23 +187,23 @@ func cherryPickRevision(root string, st store.Store, targetSeq int) (storeRevisi
 //   - After != nil → Put(*After) (record existed at that seq)
 //   - After == nil → Delete(id) (record was absent at that seq)
 //
-// Returns an error if uptoSeq is out of range.
-func checkoutState(root string, uptoSeq int) ([]store.Record, error) {
+// Returns an error if upToSeq is out of range.
+func checkoutState(root string, upToSeq int) ([]store.Record, error) {
 	revs := readRevisions(root)
 	if len(revs) == 0 {
 		return nil, fmt.Errorf("checkout: journal is empty")
 	}
 	maxSeq := revs[len(revs)-1].Seq
-	if uptoSeq < 1 {
-		return nil, fmt.Errorf("checkout: seq must be >= 1 (got %d)", uptoSeq)
+	if upToSeq < 1 {
+		return nil, fmt.Errorf("checkout: seq must be >= 1 (got %d)", upToSeq)
 	}
-	if uptoSeq > maxSeq {
-		return nil, fmt.Errorf("checkout: seq %d is beyond the latest revision #%d", uptoSeq, maxSeq)
+	if upToSeq > maxSeq {
+		return nil, fmt.Errorf("checkout: seq %d is beyond the latest revision #%d", upToSeq, maxSeq)
 	}
 
 	mem := store.NewMem()
 	for _, r := range revs {
-		if r.Seq > uptoSeq {
+		if r.Seq > upToSeq {
 			break
 		}
 		if r.After != nil {

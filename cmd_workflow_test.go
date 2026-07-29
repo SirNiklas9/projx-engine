@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/SirNiklas9/projx-engine/internal/routing"
 )
 
 func writeWorkflowManifestTestFile(t *testing.T, body string) string {
@@ -111,6 +113,19 @@ func TestSequentialWorkflowChildHasNoParallelLease(t *testing.T) {
 	}
 	if !strings.Contains(joined, "PROJX_WORKER_ROLE=implementation") {
 		t.Fatalf("worker role missing: %v", env)
+	}
+}
+
+func TestWorkflowTierOverridePreservesStructuredProviderPolicy(t *testing.T) {
+	cfg := routing.Config{Providers: []routing.Provider{{
+		Class: "deep-reasoning", Provider: "codex", Profile: "deep-reasoning", Model: "gpt-5-codex",
+	}}}
+	d := applyWorkflowTierDecision(routing.Decision{Kind: "agent", Class: "default"}, cfg, "deep-reasoning")
+	if d.ProviderCmd != "" || d.Provider != "codex" || d.Profile != "deep-reasoning" || d.Model != "gpt-5-codex" {
+		t.Fatalf("workflow tier lost structured provider policy: %+v", d)
+	}
+	if d.Source != "workflow-tier" || d.Reason == "" {
+		t.Fatalf("workflow tier decision lacks deterministic provenance: %+v", d)
 	}
 }
 

@@ -59,11 +59,20 @@ func runMapCmd(absRoot string, args []string) {
 	if len(args) > 0 {
 		sub = args[0]
 	}
+	var subArgs []string
+	if len(args) > 1 {
+		subArgs = args[1:]
+	}
 	switch sub {
 	case "sync":
-		runMapSync(absRoot, args[1:]) // extra args = additional repo source dirs (multi-repo workspace)
+		rest, jsonOut := takeJSONFlag(subArgs)
+		runMapSync(absRoot, rest, jsonOut) // extra args = additional repo source dirs (multi-repo workspace)
 	case "list":
-		runMapList(absRoot)
+		rest, jsonOut := takeJSONFlag(subArgs)
+		if len(rest) > 0 {
+			die("map list: unexpected argument %q", rest[0])
+		}
+		runMapList(absRoot, jsonOut)
 	default:
 		die("map: unknown subcommand %q (want: sync, list)", sub)
 	}
@@ -72,10 +81,14 @@ func runMapCmd(absRoot string, args []string) {
 // runMapSync is the CLI face: it runs syncMap and prints a summary. Extra srcs index
 // ADDITIONAL repos into this root's store (a multi-repo workspace map), with each
 // symbol's anchor/key prefixed by its repo so cross-repo jumps stay unambiguous.
-func runMapSync(absRoot string, srcs []string) {
+func runMapSync(absRoot string, srcs []string, jsonFlags ...bool) {
 	written, pruned, skipped, err := syncMap(absRoot, srcs)
 	if err != nil {
 		die("map sync: %v", err)
+	}
+	if optionalJSONFlag(jsonFlags) {
+		writeCLIJSON(map[string]any{"ok": true, "indexed": written, "pruned": pruned, "skipped": skipped})
+		return
 	}
 	fmt.Printf("map sync: %d symbol(s) indexed, %d pruned", written, pruned)
 	if len(skipped) > 0 {
@@ -150,18 +163,28 @@ func syncMap(absRoot string, srcs []string) (written, pruned int, skipped []stri
 }
 
 // runMapList prints the current code-map records (id + key + anchor).
-func runMapList(absRoot string) {
+func runMapList(absRoot string, jsonFlags ...bool) {
 	st := openStore(absRoot)
 	defer st.Close()
 	n := 0
+	entries := []map[string]string{}
 	for _, r := range st.List(store.OfKind(store.KDeclaredStructure)) {
 		if r.Origin != mapRecordOrigin {
 			continue
 		}
 		var b mapAnchorBody
 		_ = json.Unmarshal([]byte(r.Body), &b)
+		entries = append(entries, map[string]string{"key": r.Key, "signature": b.Signature, "anchor": b.Anchor})
+		if optionalJSONFlag(jsonFlags) {
+			n++
+			continue
+		}
 		fmt.Printf("%s\t%s\t%s\n", r.Key, b.Signature, b.Anchor)
 		n++
+	}
+	if optionalJSONFlag(jsonFlags) {
+		writeCLIJSON(map[string]any{"count": n, "symbols": entries})
+		return
 	}
 	if n == 0 {
 		fmt.Println("map list: no code-map records (run `map sync`)")

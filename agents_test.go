@@ -9,6 +9,15 @@ import (
 	store "github.com/SirNiklas9/projx-store"
 )
 
+func TestWorkerContextForbidsRecursiveDispatch(t *testing.T) {
+	got := applyWorkerRole("project context", "default worker")
+	for _, want := range []string{"PROJX_ROLE=worker", "Implement and verify THIS assigned task directly", "Do not call `route`", "default worker"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("worker context missing %q:\n%s", want, got)
+		}
+	}
+}
+
 // TestPrepareAgentContext proves "the rest of the engine work" reaches the agent
 // even uncaged: the seeded contract is compiled into a context file, the env
 // carries it, and it's threaded into the agent invocation.
@@ -89,6 +98,56 @@ func TestAgentTemplateRender(t *testing.T) {
 	}
 }
 
+func TestBuiltinCodexTemplateRender(t *testing.T) {
+	adapter, ok := builtinProviderAdapter("codex")
+	if !ok {
+		t.Fatal("Codex adapter is not registered")
+	}
+	name, args := adapter.Build(ProviderInvocation{
+		Task: "fix the dispatcher", Model: "gpt-5.6-sol", NativeEffort: "ultra", SystemPromptFile: "/ctx.md",
+	})
+	got := name + " " + strings.Join(args, " ")
+	for _, want := range []string{"codex", "exec", "--model gpt-5.6-sol", `--config model_reasoning_effort="ultra"`, "sandbox_workspace_write.network_access=true", "features.network_proxy.enabled=true", `features.network_proxy.domains={ "api.openai.com" = "allow" }`, "--sandbox workspace-write", "Before acting, read and follow the ProjX execution context", "/ctx.md", "fix the dispatcher"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("Codex invocation missing %q in %q", want, got)
+		}
+	}
+	if strings.Contains(got, "--profile") {
+		t.Errorf("routing profile leaked into Codex config-file profile flag: %s", got)
+	}
+}
+
+func TestBuiltinClaudeAdapterRendersEffortAndEphemeralOutput(t *testing.T) {
+	adapter, ok := builtinProviderAdapter("claude")
+	if !ok {
+		t.Fatal("Claude adapter is not registered")
+	}
+	if !adapter.Capabilities().ReasoningEffort {
+		t.Fatal("Claude adapter does not declare reasoning effort")
+	}
+	name, args := adapter.Build(ProviderInvocation{
+		Task: "fix the dispatcher", Model: "sonnet", NativeEffort: "xhigh", SystemPromptFile: "/ctx.md",
+	})
+	got := name + " " + strings.Join(args, " ")
+	for _, want := range []string{"claude", "-p", "--no-session-persistence", "--model sonnet", "--effort xhigh", "--append-system-prompt-file /ctx.md"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("Claude invocation missing %q in %q", want, got)
+		}
+	}
+}
+
+func TestProviderNetworkHostsAreProviderSpecific(t *testing.T) {
+	if got := providerNetworkHosts("codex"); len(got) != 1 || got[0] != "api.openai.com" {
+		t.Fatalf("codex network hosts = %q", got)
+	}
+	if got := providerNetworkHosts("claude"); len(got) != 1 || got[0] != "api.anthropic.com" {
+		t.Fatalf("claude network hosts = %q", got)
+	}
+	if got := providerNetworkHosts("unknown"); len(got) != 0 {
+		t.Fatalf("unknown network hosts = %q", got)
+	}
+}
+
 func TestResolveAgentFromFileAndOverride(t *testing.T) {
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, ".projx"), 0o755); err != nil {
@@ -114,5 +173,32 @@ func TestResolveAgentFromFileAndOverride(t *testing.T) {
 	name, args = resolveAgentArgv(root, "task", renderOpts{})
 	if name != "myagent" || strings.Join(args, " ") != "--flag task" {
 		t.Errorf("PROJX_AGENT_CMD override wrong: %s %v", name, args)
+	}
+}
+
+func TestPrepareAgentContextInjectsPolicyBlock(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".projx"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(filepath.Join(root, ".projx", "store.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Seed(st, root, nil); err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+	t.Setenv("PROJX_POLICY_CLASS", "deep-reasoning")
+	t.Setenv("PROJX_POLICY_PROVIDER", "codex")
+	t.Setenv("PROJX_POLICY_PROFILE", "deep-reasoning")
+	t.Setenv("PROJX_POLICY_MODEL", "gpt-5-codex")
+	t.Setenv("PROJX_POLICY_FALLBACK", "explicit-only")
+	_, env := prepareAgentContext(root, "redesign auth")
+	ctx := env["PROJX_STORE_CONTEXT"]
+	for _, want := range []string{"## Active execution policy", `"task_class": "deep-reasoning"`, `"preferred_provider": "codex"`, `"preferred_model": "gpt-5-codex"`, `"fallback": "explicit-only"`} {
+		if !strings.Contains(ctx, want) {
+			t.Fatalf("policy block missing %q in context:\n%s", want, ctx)
+		}
 	}
 }

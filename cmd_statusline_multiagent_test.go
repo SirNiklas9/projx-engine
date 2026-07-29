@@ -139,6 +139,9 @@ func TestRegisterAndPruneDispatchRoots(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(proj, ".projx"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(proj, ".projx", "store.db"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
 	registerDispatchRoot(proj)
 	registerDispatchRoot(proj) // idempotent
 

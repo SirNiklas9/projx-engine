@@ -1,7 +1,6 @@
 package main
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -147,8 +146,11 @@ func targetStoreRoot(absRoot, path string) string {
 	// Walk up from the file's own directory looking for a real project store.
 	dir := filepath.Dir(abs)
 	for i := 0; i < 64; i++ {
-		if fi, err := os.Stat(filepath.Join(dir, ".projx", "store.db")); err == nil && !fi.IsDir() {
+		if isProjectStoreRoot(dir) {
 			return dir
+		}
+		if isWorkspaceRoot(dir) {
+			break
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {

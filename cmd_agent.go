@@ -135,65 +135,10 @@ func runAgentCmd(absRoot string, args []string) {
 		allowHosts = dedupStrings(append(allowHosts, langHosts...))
 	}
 
-	// ── Step 2: resolve the agent command (BEFORE any jail/PATH change) ───────
-	// Capture the real PATH now, before we modify anything.
+	// ── Step 2: retain the real PATH before any jail/PATH change ──────────────
+	// Provider invocation is deliberately resolved after the context file exists:
+	// each adapter owns how it delivers that context.
 	realPath := os.Getenv("PATH")
-
-	// PROJX_AGENT_CMD may be a full command line (e.g. the decider's tier choice
-	// "claude --model claude-opus-4-8"), not just a binary path — split it so the
-	// leading args (the model flag) reach the agent. A bare path stays a 1-element
-	// split (unchanged behavior).
-	var agentLeadingArgs []string
-	agentAbsPath := ""
-	if cmd := strings.TrimSpace(os.Getenv("PROJX_AGENT_CMD")); cmd != "" {
-		f := strings.Fields(cmd)
-		agentAbsPath = f[0]
-		agentLeadingArgs = f[1:]
-	}
-	if agentAbsPath == "" {
-		p, err := exec.LookPath("claude")
-		if err == nil {
-			agentAbsPath = p
-		}
-	}
-	// A bare command name from a route cmd (e.g. "claude --model …") must be resolved
-	// on PATH — otherwise filepath.Abs below turns "claude" into "<cwd>/claude", which
-	// does not exist and the launch fails "cannot find the file".
-	if agentAbsPath != "" && !filepath.IsAbs(agentAbsPath) && !strings.ContainsAny(agentAbsPath, `/\`) {
-		if p, err := exec.LookPath(agentAbsPath); err == nil {
-			agentAbsPath = p
-		}
-	}
-	if agentAbsPath == "" {
-		fmt.Fprintln(os.Stderr, "projx-engine: no agent found: set PROJX_AGENT_CMD or install an agent CLI on PATH")
-		os.Exit(1)
-	}
-	// Make the agent path absolute so it survives the jailed env.
-	if !filepath.IsAbs(agentAbsPath) {
-		abs, err := filepath.Abs(agentAbsPath)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "projx-engine: cannot make agent path absolute: %v\n", err)
-			os.Exit(1)
-		}
-		agentAbsPath = abs
-	}
-
-	// Worker permissions (Claude launcher): full autonomy when the human has granted it
-	// (setting/worker-autonomy), else auto-approve the declared safe-list so the worker
-	// runs unattended for normal coding while anything outside it still prompts — the
-	// "reach and ask for more" escalation. Other providers keep their own config. The
-	// ProjX gate still blocks secrets/off-limits in either mode.
-	if isClaudeAgent(agentAbsPath) {
-		if workerFullAuto {
-			agentLeadingArgs = append([]string{"--dangerously-skip-permissions"}, agentLeadingArgs...)
-		} else if len(agentLeadingArgs) > 0 {
-			// PREPEND the allow-list: --allowedTools is variadic (<tools...>) and would
-			// otherwise swallow the trailing task prompt. Placing it first means the next
-			// route flag (--permission-mode / --model) terminates the variadic, leaving the
-			// prompt intact as a positional arg. Guarded on there being a following flag.
-			agentLeadingArgs = append(claudeAllowedToolsArgs(workerBins), agentLeadingArgs...)
-		}
-	}
 
 	// ── Step 3: open the store, compile and write the ambient context ─────────
 	// With a --task, slice the contract to the task (law + only relevant records)
@@ -215,6 +160,50 @@ func runAgentCmd(absRoot string, args []string) {
 	if ctxWriteErr != nil {
 		// Non-fatal: warn, but continue. Env-var delivery still carries the context.
 		fmt.Fprintf(os.Stderr, "projx-engine: warning: could not write agent-context.md: %v\n", ctxWriteErr)
+	}
+
+	launchTask := task
+	if len(passthroughArgs) > 0 {
+		launchTask = strings.Join(passthroughArgs, " ")
+	}
+	agentName, agentLeadingArgs := resolveAgentArgv(absRoot, launchTask, renderOpts{
+		Model: os.Getenv("PROJX_AGENT_MODEL"), Profile: os.Getenv("PROJX_AGENT_PROFILE"),
+		NativeEffort: os.Getenv("PROJX_AGENT_EFFORT"), SystemPromptFile: ctxFile,
+	})
+	// Each native adapter declares its minimal inference endpoint. This keeps
+	// provider egress structured and prevents optional plugin traffic from
+	// widening a worker's network policy.
+	allowHosts = dedupStrings(append(allowHosts, providerNetworkHosts(agentName)...))
+	agentAbsPath := agentName
+	if !filepath.IsAbs(agentAbsPath) && !strings.ContainsAny(agentAbsPath, `/\`) {
+		if p, err := exec.LookPath(agentAbsPath); err == nil {
+			agentAbsPath = p
+		} else {
+			agentAbsPath = ""
+		}
+	}
+	if agentAbsPath == "" {
+		fmt.Fprintln(os.Stderr, "projx-engine: no agent found: set PROJX_AGENT_CMD or install an agent CLI on PATH")
+		os.Exit(1)
+	}
+	if !filepath.IsAbs(agentAbsPath) {
+		abs, err := filepath.Abs(agentAbsPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "projx-engine: cannot make agent path absolute: %v\n", err)
+			os.Exit(1)
+		}
+		agentAbsPath = abs
+	}
+	agentAbsPath = preferProviderRuntime(agentName, agentAbsPath)
+
+	// Claude's equivalent least-privilege policy remains provider-specific. Codex
+	// receives its explicit workspace-write policy from its adapter above.
+	if isClaudeAgent(agentAbsPath) {
+		if workerFullAuto {
+			agentLeadingArgs = append([]string{"--dangerously-skip-permissions"}, agentLeadingArgs...)
+		} else if len(agentLeadingArgs) > 0 {
+			agentLeadingArgs = append(claudeAllowedToolsArgs(workerBins), agentLeadingArgs...)
+		}
 	}
 
 	// ── Step 4: build the jail ────────────────────────────────────────────────
@@ -245,6 +234,11 @@ func runAgentCmd(absRoot string, args []string) {
 		AllowHosts: allowHosts,
 	}
 	env := j.Env(os.Environ())
+	// The jail intentionally removes the ambient PATH, but provider CLIs can
+	// launch sibling runtime helpers (Codex's Windows sandbox helper is one).
+	// Preserve only the resolved provider executable directory ahead of the
+	// jail shims; never restore the broad parent PATH.
+	env = prependProviderRuntimePath(env, agentAbsPath)
 	// Inject the ambient store context two ways:
 	//   PROJX_STORE_CONTEXT      — the full preamble text (env-var delivery).
 	//   PROJX_STORE_CONTEXT_FILE — path to the on-disk file (file delivery).
@@ -317,7 +311,7 @@ func runAgentCmd(absRoot string, args []string) {
 			"%snetwork: %s. "+
 			"%s"+
 			"knowledge: read via 'projx-engine store query', write via "+
-			"'projx-engine store commit --kind doc|adr|convention|declared-structure --key ... --body ...'. "+
+			"'projx-engine store commit --kind doc|adr|convention|declared-structure --key ... --body ... --claim-class ... --evidence ...'. "+
 			"gate/secrets are human-only. "+
 			"secrets: %d available to commands you run, by env var, by codename: [%s]. you cannot read their values.\n",
 		c.Level(),
@@ -361,7 +355,7 @@ func runAgentCmd(absRoot string, args []string) {
 		}
 
 		confinedEnv := append(env, "PROJX_JAIL_DIR="+jailDir)
-		agentArgv := append(append([]string{agentAbsPath}, agentLeadingArgs...), passthroughArgs...)
+		agentArgv := append([]string{agentAbsPath}, agentLeadingArgs...)
 		policy := confine.DefaultPolicy(absRoot, jailDir, filepath.Dir(agentAbsPath))
 
 		code, launchErr := c.LaunchConfined(policy, agentArgv, confinedEnv, absRoot)
@@ -373,7 +367,7 @@ func runAgentCmd(absRoot string, args []string) {
 	}
 
 	// Cooperative path — direct launch, no OS-FS confinement.
-	cmd := exec.Command(agentAbsPath, append(append([]string{}, agentLeadingArgs...), passthroughArgs...)...)
+	cmd := exec.Command(agentAbsPath, append([]string{}, agentLeadingArgs...)...)
 	cmd.Env = env
 	cmd.Dir = absRoot
 	cmd.Stdin = os.Stdin
@@ -385,4 +379,18 @@ func runAgentCmd(absRoot string, args []string) {
 		os.Exit(exitCode(runErr))
 	}
 	os.Exit(0)
+}
+
+func prependProviderRuntimePath(env []string, agentPath string) []string {
+	dir := strings.TrimSpace(filepath.Dir(agentPath))
+	if dir == "" || dir == "." {
+		return env
+	}
+	for i, kv := range env {
+		if strings.HasPrefix(strings.ToUpper(kv), "PATH=") {
+			env[i] = "PATH=" + dir + string(os.PathListSeparator) + kv[len("PATH="):]
+			return env
+		}
+	}
+	return append(env, "PATH="+dir)
 }

@@ -10,6 +10,7 @@ import (
 )
 
 func runImpactCmd(absRoot string, args []string) {
+	args, jsonOut := takeJSONFlag(args)
 	var target string
 	depth := 0
 	for i := 0; i < len(args); i++ {
@@ -35,6 +36,10 @@ func runImpactCmd(absRoot string, args []string) {
 	st := openStore(absRoot)
 	defer st.Close()
 	hits, truncated := computeImpact(st, target, depth)
+	if jsonOut {
+		writeCLIJSON(map[string]any{"target": target, "depth": depth, "count": len(hits), "truncated": truncated, "hits": hits})
+		return
+	}
 	if len(hits) == 0 {
 		fmt.Printf("impact %s: no callers found in the indexed code-map (run `map sync` if this is stale)\n", target)
 		return

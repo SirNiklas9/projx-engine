@@ -38,6 +38,10 @@ func runDispatchCmd(absRoot string, args []string) {
 		runDispatchStatus(absRoot, args[1:])
 		return
 	}
+	if len(args) > 0 && args[0] == "cancel" {
+		runDispatchCancel(absRoot, args[1:])
+		return
+	}
 
 	run := false
 	rest := args[:0]

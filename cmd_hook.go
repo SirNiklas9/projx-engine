@@ -25,6 +25,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	store "github.com/SirNiklas9/projx-store"
 )
@@ -162,6 +163,11 @@ func uniqueHookPaths(in []string) []string {
 
 // runHookCmd reads the hook JSON from stdin, dispatches, and exits with the right code.
 func runHookCmd(absRoot string, args []string) {
+	started := time.Now()
+	// Hook hosts enforce hard deadlines. Keep any subprocesses in the hook's
+	// lifetime so a timeout cannot orphan compilers, tests, or agents.
+	_ = containHookDescendants()
+
 	// PROJX_AGENT_CONTEXT=1 (restricted mode, set inside a caged agent run) would refuse
 	// the engine ops the hooks need; the connector always ran with it unset, so do the same.
 	_ = os.Unsetenv("PROJX_AGENT_CONTEXT")
@@ -169,18 +175,22 @@ func runHookCmd(absRoot string, args []string) {
 	// PROJX_CELL_URL set → drive the deployed cell over HTTP; else compute locally.
 	var stdout, stderr string
 	var code int
+	meta := decodeLifecycleEvent(data)
+	mapRefreshDecision := "not-session-start"
 	if cellURL := strings.TrimSpace(os.Getenv("PROJX_CELL_URL")); cellURL != "" {
 		stdout, stderr, code = handleHookViaCell(cellURL, data)
 	} else {
 		root := hookRoot(absRoot, data)
 		stdout, stderr, code = handleHook(root, data)
+		if meta.Event == "SessionStart" {
+			mapRefreshDecision = scheduleMapRefreshDecision(root)
+		}
 		// Status-line breadcrumb (best-effort, never affects the result). Records two
 		// facts for `projx-engine statusline`: the last visible ProjX ACTION (ctx/gate)
 		// and the actively-touched PROJECT (floating scope — the badge follows what any
 		// agent edits/reads, not the static cwd). The crumb lives in the session cwd's
 		// project so the statusline command, deriving the same home, finds it.
 		home := targetStoreRoot(root, filepath.Join(root, "_"))
-		meta := decodeLifecycleEvent(data)
 		if meta.SessionID != "" {
 			targets := hookTargetPaths(meta)
 			switch {
@@ -210,6 +220,13 @@ func runHookCmd(absRoot string, args []string) {
 	if codexHookRequested(args) {
 		stdout = codexHookOutput(hookRoot(absRoot, data), data, stdout)
 	}
+	harness := "claude"
+	if codexHookRequested(args) {
+		harness = "codex"
+	}
+	recordLifecycleTelemetry(hookRoot(absRoot, data), meta, mapRefreshDecision, len(stdout), lifecycleTelemetryContext{
+		Started: started, ExitCode: code, Harness: harness,
+	})
 	if stdout != "" {
 		fmt.Print(stdout)
 	}
@@ -239,10 +256,7 @@ func codexHookOutput(absRoot string, input []byte, context string) string {
 			"additionalContext": context,
 		},
 	}
-	if statusLinkRoot(absRoot) != "" {
-		_ = ensureStatusServer(absRoot, []string{"--session", ev.SessionID}, false)
-		payload["systemMessage"] = "ProjX live status: http://" + statusDashboardAddr + "/"
-	}
+	payload["systemMessage"] = renderCodexStatusMessage(buildStatusSnapshot(absRoot, ev.SessionID))
 	out, _ := json.Marshal(payload)
 	return string(out)
 }
@@ -306,9 +320,8 @@ func handleHook(absRoot string, input []byte) (stdout, stderr string, code int) 
 
 	switch ev.Event {
 	case "SessionStart":
-		// Refresh the code map (silently), then inject the lean floor. Codex owns
-		// dashboard presentation in its separate systemMessage hook.
-		_, _, _, _ = syncMap(absRoot, nil)
+		// Inject the lean floor immediately. The CLI adapter schedules an
+		// incremental map refresh after this print-free core returns.
 		ctx := reconciliationPrompt(absRoot) + buildSessionContext(absRoot, sid, "", false)
 		markGovernedRecall(absRoot, sid, "")
 		if disp := surfaceFinishedDispatches(absRoot); disp != "" {
@@ -328,7 +341,6 @@ func handleHook(absRoot string, input []byte) (stdout, stderr string, code int) 
 		root := activeContextRoot(absRoot, sid, ev.Prompt)
 		ctx := reconciliationPrompt(root) + buildSessionContext(root, sid, ev.Prompt, false)
 		markGovernedRecall(absRoot, sid, ev.Prompt)
-		ctx = pendingLearnNotice(root, sid) + ctx
 		// NEXT-PROMPT SURFACE: any detached dispatch that finished but hasn't been
 		// reported gets a concise summary prepended here (and flipped Reported=true), so
 		// the background result reaches Nick on his next turn without polling.
@@ -336,6 +348,7 @@ func handleHook(absRoot string, input []byte) (stdout, stderr string, code int) 
 			ctx = disp + "\n" + ctx
 		}
 		if ctx != "" {
+			ctx = budgetAutomaticHookContext(ctx)
 			return wrapProjectContext(frame(withOverrideNotice(root, ctx))), "", 0
 		}
 		return "", "", 0
@@ -368,7 +381,7 @@ func handleHook(absRoot string, input []byte) (stdout, stderr string, code int) 
 		// floor must deny when it cannot prove the action is allowed.
 		st, err := openStoreExistingSafe(storeRoot)
 		if err != nil {
-			return "", fmt.Sprintf("ProjX gate: store unavailable (%v) — failing closed, action blocked.", err), 2
+			return "", fmt.Sprintf("ProjX gate: store unavailable (%v); failing closed, action blocked.", err), 2
 		}
 		defer st.Close()
 		if cp, err := refreshReconciliation(storeRoot, false); err == nil {

@@ -125,7 +125,7 @@
     </section>
 
     <section class="card panel" aria-labelledby="agents-heading">
-      <h2 id="agents-heading">Running agents</h2>
+      <h2 id="agents-heading">Running work</h2>
       <div class="table-wrap" id="agent-table"></div>
     </section>
 
@@ -141,7 +141,9 @@
       hooks: 'Hooks configured',
       hooks_current: 'Hook binary parity',
       binary: 'Running binary',
-      binary_stale: 'Source freshness'
+      binary_stale: 'Installed revision',
+      catalog: 'Model catalog',
+      catalog_fresh: 'Catalog freshness'
     };
 
     function bytes(n) {
@@ -170,6 +172,19 @@
         chip.setAttribute('aria-label', `${label}: ${healthy ? 'healthy' : 'attention needed'}`);
         el.append(chip);
       });
+      const summary = document.createElement('span');
+      summary.className = 'chip';
+      summary.textContent = `${health.summary || 'health unknown'} · ${health.usable_model_profiles || 0} usable profiles`;
+      el.append(summary);
+    }
+
+    function providerLabel(agent) {
+      if (agent.provider_cmd) return agent.provider_cmd;
+      const provider = agent.provider || 'ambient';
+      const model = agent.provider_model || agent.provider_profile || '';
+      const effort = agent.provider_effort || '';
+      const profile = model ? `${provider} / ${model}` : provider;
+      return effort ? `${profile} (${effort})` : profile;
     }
 
     function renderAgents(agents) {
@@ -178,16 +193,24 @@
       if (!agents.length) {
         const empty = document.createElement('p');
         empty.className = 'empty';
-        empty.textContent = 'No background agents are running.';
+        empty.textContent = 'No background agent or workflow work is running.';
         wrap.append(empty);
         return;
       }
       const table = document.createElement('table');
-      table.innerHTML = '<thead><tr><th>Project</th><th>Operation</th><th>Progress</th><th>State</th><th>Verification</th></tr></thead>';
+      table.innerHTML = '<thead><tr><th>Project</th><th>Step</th><th>Provider</th><th>Policy</th><th>Process</th><th>State</th><th>Verification</th></tr></thead>';
       const body = document.createElement('tbody');
       agents.forEach(agent => {
         const row = document.createElement('tr');
-        [agent.project, agent.operation, `${agent.step}/${agent.total}`, agent.state, agent.verify || 'not run'].forEach(value => {
+        [
+          agent.project,
+          agent.operation,
+          providerLabel(agent),
+          [agent.route_source, agent.selection].filter(Boolean).join(' / ') || agent.role || 'worker',
+          agent.pid ? `pid ${agent.pid}${agent.parent_pid ? ` \u2190 ${agent.parent_pid}` : ''}` : `${agent.step}/${agent.total}`,
+          agent.failure_reason ? `${agent.state}: ${agent.failure_reason}` : agent.state,
+          agent.verify || 'not run'
+        ].forEach(value => {
           const cell = document.createElement('td');
           cell.textContent = value;
           row.append(cell);

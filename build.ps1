@@ -1,6 +1,4 @@
-# install.ps1 — build + install the projx-engine CLI on Windows.
-# Produces projx-engine.exe (PowerShell/cmd need the .exe extension) and ensures
-# %USERPROFILE%\.local\bin is on your User PATH. Run from the repo:  .\install.ps1
+# build.ps1 - build and stage the ProjX Windows executables.
 $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
 
@@ -10,20 +8,24 @@ New-Item -ItemType Directory -Force -Path $bin | Out-Null
 $env:GOWORK = 'off'
 $exe = Join-Path $bin 'projx-engine.exe'
 $headless = Join-Path $bin 'projx-engine-headless.exe'
-# Stamp the version from git so the binary reports the real release, never a
-# hardcoded number. Falls back to 'dev' outside a git checkout.
+$alias = Join-Path $bin 'projx.cmd'
 $ver = git describe --tags --always --dirty
 if ([string]::IsNullOrWhiteSpace($ver)) { $ver = 'dev' }
+
 go build -ldflags "-X main.version=$ver" -o $exe .
-go build -ldflags "-H=windowsgui" -o $headless .\cmd\projx-headless
+go build -ldflags '-H=windowsgui' -o $headless .\cmd\projx-headless
+$aliasBody = @('@echo off', ('"{0}" %*' -f $exe), '') -join "`r`n"
+Set-Content -LiteralPath $alias -Value $aliasBody -NoNewline -Encoding Ascii
+
 Write-Host "installed $ver -> $exe"
 Write-Host "installed headless adapter -> $headless"
+Write-Host "installed public command -> $alias"
 
 $userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
 if ($userPath -notlike "*$bin*") {
     [Environment]::SetEnvironmentVariable('PATH', "$userPath;$bin", 'User')
-    Write-Host "added $bin to your User PATH — open a NEW terminal to pick it up."
+    Write-Host "added $bin to your User PATH - open a new terminal to pick it up."
 } else {
     Write-Host "$bin already on PATH."
 }
-Write-Host "done. In a new terminal:  cd <your repo>;  projx-engine init"
+Write-Host 'done. In a new terminal: cd YOUR_REPO; projx init'

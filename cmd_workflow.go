@@ -133,12 +133,26 @@ func loadWorkflowManifest(path string) (*WorkflowManifest, error) {
 // the routing config. Config.Providers is exported, so a pinned tier is honored
 // without reaching into the routing package's unexported resolver. "" ⇒ ambient default.
 func providerCmdForClass(cfg routing.Config, class string) string {
-	for _, p := range cfg.Providers {
-		if strings.EqualFold(p.Class, class) {
-			return p.Cmd
-		}
+	return routing.ProviderForClass(cfg, class).Cmd
+}
+
+func applyWorkflowTierDecision(d routing.Decision, cfg routing.Config, tier string) routing.Decision {
+	tier = strings.TrimSpace(tier)
+	if tier == "" {
+		return d
 	}
-	return ""
+	p := routing.ProviderForClass(cfg, tier)
+	d.Kind = "agent"
+	d.Class = tier
+	d.ProviderCmd = p.Cmd
+	d.Provider = p.Provider
+	d.Profile = p.Profile
+	d.Model = p.Model
+	d.Effort = p.Effort
+	d.NativeEffort = p.NativeEffort
+	d.Source = "workflow-tier"
+	d.Reason = "tier pinned by workflow manifest"
+	return d
 }
 
 // runWorkflowCmd implements `workflow run [--dry-run] <manifest.json>`.
@@ -181,13 +195,7 @@ func runWorkflowCmd(absRoot string, args []string) {
 	decisions := make([]routing.Decision, len(m.Steps))
 	for i, s := range m.Steps {
 		d := routing.DecideWithStore(st, s.Task, cfg, triage)
-		if strings.TrimSpace(s.Tier) != "" { // authored tier override → agent at that class
-			d.Kind = "agent"
-			d.Class = s.Tier
-			d.ProviderCmd = providerCmdForClass(cfg, s.Tier)
-			d.Source = "workflow-tier"
-			d.Reason = "tier pinned by workflow manifest"
-		}
+		d = applyWorkflowTierDecision(d, cfg, s.Tier)
 		decisions[i] = d
 	}
 	st.Close()
@@ -265,14 +273,14 @@ func runWorkflowCmd(absRoot string, args []string) {
 
 func runWorkflowChild(self, absRoot string, s WorkflowStep, d routing.Decision, parallel bool) error {
 	if d.Kind == "deterministic" {
-		return runDispatchChild(self, absRoot, deterministicStepArgs(d.Op), "", nil)
+		return runDispatchChild(self, absRoot, deterministicStepArgs(d.Op), "", "", "", "", "", "", nil)
 	}
 	role := strings.TrimSpace(s.Role)
 	if role == "" {
 		role = workerRoleForStep(dispatchStepStat{Tier: d.Class, Kind: d.Kind, Op: d.Op})
 	}
 	env := workflowChildEnv(s, role, parallel)
-	return runDispatchChild(self, absRoot, []string{"agent", "run", "--task", s.Task, "--", s.Task}, d.ProviderCmd, env)
+	return runDispatchChild(self, absRoot, []string{"agent", "run", "--task", s.Task, "--", s.Task}, d.Class, d.ProviderCmd, d.Provider, d.Profile, d.Model, firstNonEmpty(d.NativeEffort, d.Effort), env)
 }
 
 func workflowChildEnv(s WorkflowStep, role string, parallel bool) []string {
@@ -398,16 +406,23 @@ func startDetachedWorkflow(absRoot string, m *WorkflowManifest, decisions []rout
 	for i, s := range m.Steps {
 		d := decisions[i]
 		stat := dispatchStepStat{
-			Task:        s.Task,
-			Tier:        workflowTierLabel(d),
-			Kind:        d.Kind,
-			Op:          d.Op,
-			ProviderCmd: d.ProviderCmd,
-			State:       "pending",
-			ID:          s.ID,
-			Deps:        s.Deps,
-			Gate:        resolveStepGate(s),
-			Writes:      s.Writes,
+			Task:            s.Task,
+			Tier:            workflowTierLabel(d),
+			Kind:            d.Kind,
+			Op:              d.Op,
+			ProviderCmd:     d.ProviderCmd,
+			Provider:        d.Provider,
+			ProviderProfile: d.Profile,
+			ProviderModel:   d.Model,
+			ProviderEffort:  firstNonEmpty(d.NativeEffort, d.Effort),
+			RouteReason:     d.Reason,
+			RouteSource:     d.Source,
+			Selection:       d.Selection,
+			State:           "pending",
+			ID:              s.ID,
+			Deps:            s.Deps,
+			Gate:            resolveStepGate(s),
+			Writes:          s.Writes,
 		}
 		role := strings.TrimSpace(s.Role)
 		if stat.Kind != "deterministic" && role == "" {
@@ -465,6 +480,10 @@ func runWorkflowSupervise(absRoot string, args []string) {
 		os.Exit(1)
 	}
 	id := args[0]
+	if err := containDispatchDescendants(); err != nil {
+		fmt.Fprintf(os.Stderr, "workflow-run: cannot contain managed children: %v\n", err)
+		os.Exit(1)
+	}
 	m, err := readDispatchManifest(absRoot, id)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "workflow-run: cannot load manifest %s: %v\n", id, err)
@@ -507,7 +526,7 @@ func runWorkflowSupervise(absRoot string, args []string) {
 
 		var stepErr error
 		if st.Kind == "deterministic" {
-			stepErr = runDispatchChild(self, absRoot, deterministicStepArgs(st.Op), "", nil)
+			stepErr = runDispatchChild(self, absRoot, deterministicStepArgs(st.Op), "", "", "", "", "", "", nil)
 		} else {
 			role := st.Role
 			if role == "" {
@@ -515,7 +534,12 @@ func runWorkflowSupervise(absRoot string, args []string) {
 			}
 			stepErr = runDispatchChild(self, absRoot,
 				[]string{"agent", "run", "--task", st.Task, "--", st.Task},
+				st.Tier,
 				st.ProviderCmd,
+				st.Provider,
+				st.ProviderProfile,
+				st.ProviderModel,
+				st.ProviderEffort,
 				[]string{"PROJX_WORKER_ROLE=" + role})
 		}
 		if stepErr != nil {
@@ -599,14 +623,23 @@ func runParallelWorkflowSupervise(absRoot, id, self string, m *dispatchManifest)
 		}
 		errs := make([]error, len(batch))
 		var wg sync.WaitGroup
+		var manifestMu sync.Mutex
 		for bi, i := range batch {
 			m.Steps[i].State = "running"
 			fmt.Printf("\n── workflow %s: step %d/%d [%s] %s\n", id, i+1, len(m.Steps), m.Steps[i].Tier, m.Steps[i].ID)
 			wg.Add(1)
-			go func(pos int, st dispatchStepStat) {
+			go func(pos, stepIndex int, st dispatchStepStat) {
 				defer wg.Done()
-				errs[pos] = runDetachedParallelChild(self, absRoot, st)
-			}(bi, m.Steps[i])
+				errs[pos] = runDetachedParallelChild(self, absRoot, st, func(pid int) {
+					manifestMu.Lock()
+					defer manifestMu.Unlock()
+					step := &m.Steps[stepIndex]
+					step.PID = pid
+					step.ParentPID = os.Getpid()
+					step.Started = time.Now()
+					_ = writeDispatchManifest(absRoot, m)
+				})
+			}(bi, i, m.Steps[i])
 		}
 		_ = writeDispatchManifest(absRoot, m)
 		wg.Wait()
@@ -631,12 +664,14 @@ func runParallelWorkflowSupervise(absRoot, id, self string, m *dispatchManifest)
 			st := &m.Steps[i]
 			if errs[bi] != nil {
 				st.State = "failed"
+				st.Finished = time.Now()
 				failed = true
 				fmt.Printf("workflow %s: step %q failed: %v\n", id, st.ID, errs[bi])
 				continue
 			}
 			if mutationViolation {
 				st.State = "failed"
+				st.Finished = time.Now()
 				continue
 			}
 			if st.Gate != "" {
@@ -644,6 +679,7 @@ func runParallelWorkflowSupervise(absRoot, id, self string, m *dispatchManifest)
 				fmt.Printf("── workflow %s: step %q %s gate ──\n", id, st.ID, st.Gate)
 				if runWorkflowGate(absRoot, st.Gate) {
 					st.State = "failed"
+					st.Finished = time.Now()
 					failed = true
 					m.Verify = "failed"
 					continue
@@ -652,6 +688,7 @@ func runParallelWorkflowSupervise(absRoot, id, self string, m *dispatchManifest)
 			}
 			if st.State != "failed" {
 				st.State = "done"
+				st.Finished = time.Now()
 			}
 		}
 		_ = writeDispatchManifest(absRoot, m)
@@ -673,16 +710,16 @@ func runParallelWorkflowSupervise(absRoot, id, self string, m *dispatchManifest)
 	fmt.Printf("\nworkflow %s: %s (gate: %s)\n", id, m.State, orDashDispatch(m.Verify))
 }
 
-func runDetachedParallelChild(self, absRoot string, st dispatchStepStat) error {
+func runDetachedParallelChild(self, absRoot string, st dispatchStepStat, started ...func(int)) error {
 	if st.Kind == "deterministic" {
-		return runDispatchChild(self, absRoot, deterministicStepArgs(st.Op), "", nil)
+		return runDispatchChild(self, absRoot, deterministicStepArgs(st.Op), "", "", "", "", "", "", nil, started...)
 	}
 	role := st.Role
 	if role == "" {
 		role = workerRoleForStep(st)
 	}
 	env := []string{"PROJX_WORKER_ROLE=" + role, parallelWorkerEnv + "=1", "PROJX_WORKER_WRITES=" + strings.Join(st.Writes, string(os.PathListSeparator))}
-	return runDispatchChild(self, absRoot, []string{"agent", "run", "--task", st.Task, "--", st.Task}, st.ProviderCmd, env)
+	return runDispatchChild(self, absRoot, []string{"agent", "run", "--task", st.Task, "--", st.Task}, st.Tier, st.ProviderCmd, st.Provider, st.ProviderProfile, st.ProviderModel, st.ProviderEffort, env, started...)
 }
 
 // DELIBERATELY DEFERRED — held for Nick to direct the shape (see adr/workflow-dictation-

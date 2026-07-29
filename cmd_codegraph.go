@@ -78,7 +78,7 @@ func wireCodeGraph(absRoot string) []string {
 		Scope: store.ScopeProject, Key: codegraphPreferenceKey, Body: codegraphPreferenceBody, Origin: "detect:codegraph",
 	}
 	if err := st.Put(rec); err == nil {
-		lines = append(lines, "codegraph preference declared → "+rec.ID+" (edit or `store rm` to change/remove)")
+		lines = append(lines, "codegraph preference declared -> "+rec.ID+" (edit or `store rm` to change/remove)")
 	}
 	st.Close()
 	return lines

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 )
 
 var configuredBinary string
@@ -161,4 +162,60 @@ func copyImmutable(src, dst string) error {
 		return err
 	}
 	return nil
+}
+
+// staleManagedArtifacts returns only provably incomplete installation debris:
+// abandoned temp files and runtime directories missing either required binary.
+// Complete immutable runtimes are retained because another project or still-open
+// host may reference them.
+func staleManagedArtifacts(home string, now time.Time) ([]string, error) {
+	root := managedBinaryRoot(home)
+	entries, err := os.ReadDir(root)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var stale []string
+	for _, entry := range entries {
+		path := filepath.Join(root, entry.Name())
+		info, err := entry.Info()
+		if err != nil || now.Sub(info.ModTime()) < 24*time.Hour {
+			continue
+		}
+		if !entry.IsDir() {
+			if strings.HasPrefix(entry.Name(), ".projx-runtime-") {
+				stale = append(stale, path)
+			}
+			continue
+		}
+		cli := filepath.Join(path, "projx-engine")
+		headless := cli
+		if runtime.GOOS == "windows" {
+			cli += ".exe"
+			headless += "-headless.exe"
+		}
+		if !fileExists(cli) || !fileExists(headless) {
+			stale = append(stale, path)
+		}
+	}
+	return stale, nil
+}
+
+func cleanupStaleManagedArtifacts(home string, apply bool) ([]string, error) {
+	stale, err := staleManagedArtifacts(home, time.Now())
+	if err != nil || !apply {
+		return stale, err
+	}
+	for _, path := range stale {
+		rel, err := filepath.Rel(managedBinaryRoot(home), path)
+		if err != nil || rel == "." || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
+			return stale, fmt.Errorf("refusing cleanup outside managed runtime root: %s", path)
+		}
+		if err := os.RemoveAll(path); err != nil {
+			return stale, err
+		}
+	}
+	return stale, nil
 }

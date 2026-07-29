@@ -16,9 +16,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
+	"github.com/SirNiklas9/projx-engine/internal/routing"
 	store "github.com/SirNiklas9/projx-store"
 )
 
@@ -95,6 +97,17 @@ func runMCPCmd(absRoot string, _ []string) {
 
 func mcpStr(desc string) map[string]any { return map[string]any{"type": "string", "description": desc} }
 
+var launchMCPDispatch = func(root, task string) ([]byte, error) {
+	self, err := os.Executable()
+	if err != nil {
+		return nil, err
+	}
+	cmd := exec.Command(self, "--root", root, "dispatch", "--run", task)
+	cmd.Dir = root
+	cmd.Env = dispatchSupervisorEnv(os.Environ())
+	return cmd.CombinedOutput()
+}
+
 func mcpTools() []map[string]any {
 	obj := func(props map[string]any, required ...string) map[string]any {
 		return map[string]any{"type": "object", "properties": props, "required": required}
@@ -118,9 +131,17 @@ func mcpTools() []map[string]any {
 		},
 		{
 			"name":        "route",
-			"description": "Ask ProjX which model tier a task deserves (cheap-fast / default / deep-reasoning / elevate) plus the launch command.",
+			"description": "Preview the ProjX routing decision without executing it. In dispatcher mode, implementation work must use dispatch_run instead.",
 			"inputSchema": obj(map[string]any{
 				"task": mcpStr("the task description"),
+				"root": mcpStr("optional repo root"),
+			}, "task"),
+		},
+		{
+			"name":        "dispatch_run",
+			"description": "Select provider/model/effort, create a managed manifest, and launch the selected worker. This is the mandatory implementation path in dispatcher mode.",
+			"inputSchema": obj(map[string]any{
+				"task": mcpStr("the complete implementation task"),
 				"root": mcpStr("optional repo root"),
 			}, "task"),
 		},
@@ -143,17 +164,17 @@ func mcpTools() []map[string]any {
 		},
 		{
 			"name":        "store_commit",
-			"description": "Stage a durable AI discovery in this project's ProjX store as a non-authoritative candidate (NOT a markdown file). Verification or human review promotes it.",
+			"description": "Stage an explicit durable AI discovery in this project's ProjX store as a non-authoritative candidate (NOT progress or a checkpoint). Verification or human review promotes it.",
 			"inputSchema": obj(map[string]any{
 				"kind":        mcpStr("doc | convention | adr"),
 				"key":         mcpStr("a short key/title"),
 				"body":        mcpStr("the fact to remember"),
 				"scope":       mcpStr("optional: project (default) | workspace | global"),
 				"supersedes":  mcpStr("optional record id this candidate may replace"),
-				"claim_class": mcpStr("optional stable|volatile or domain-specific class"),
-				"evidence":    mcpStr("optional live-source, test, or file reference"),
+				"claim_class": mcpStr("stable | volatile | decision | convention | ownership-boundary | completion-criteria"),
+				"evidence":    mcpStr("required live source, test, or durable reference supporting the claim"),
 				"root":        mcpStr("optional repo root"),
-			}, "kind", "key", "body"),
+			}, "kind", "key", "body", "claim_class", "evidence"),
 		},
 	}
 }
@@ -213,8 +234,56 @@ func mcpToolCall(req mcpReq, defaultRoot string) mcpResp {
 	case "route":
 		st := openStore(root)
 		defer st.Close()
-		d := store.RouteDecide(st, arg("task"), nil)
-		return text(fmt.Sprintf("tier: %s\ncmd: %s\nreason: %s", d.Class, d.Cmd, d.Reason), false)
+		cfg := routing.LoadConfig(root)
+		d := routing.DecideWithStore(st, arg("task"), cfg, nil)
+		provider := d.ProviderCmd
+		if provider == "" {
+			provider = d.Provider
+		}
+		result := map[string]any{
+			"class": d.Class, "provider": provider, "profile": d.Profile,
+			"model": d.Model, "effort": firstNonEmpty(d.NativeEffort, d.Effort),
+			"selection_reason": d.Selection, "route_reason": d.Reason,
+			"source": d.Source, "fallback": d.ProviderCmd,
+		}
+		b, _ := json.MarshalIndent(result, "", "  ")
+		return mcpResp{ID: req.ID, Result: map[string]any{
+			"content":           []map[string]any{{"type": "text", "text": string(b)}},
+			"structuredContent": result, "isError": false,
+		}}
+	case "dispatch_run":
+		task := arg("task")
+		if task == "" {
+			return text("dispatch failed: task is required", true)
+		}
+		before := map[string]bool{}
+		for _, m := range listDispatchManifests(root) {
+			before[m.ID] = true
+		}
+		output, err := launchMCPDispatch(root, task)
+		if err != nil {
+			return text(fmt.Sprintf("dispatch failed: %v\n%s", err, strings.TrimSpace(string(output))), true)
+		}
+		var launched *dispatchManifest
+		for _, m := range listDispatchManifests(root) {
+			if !before[m.ID] && m.Message == task {
+				launched = m
+				break
+			}
+		}
+		if launched == nil {
+			return text("dispatch failed: launcher returned without creating a manifest", true)
+		}
+		result := map[string]any{
+			"run_id": launched.ID, "state": launched.State, "pid": launched.PID,
+			"parent_pid": launched.ParentPID, "manifest": dispatchManifestPath(root, launched.ID),
+			"steps": launched.Steps,
+		}
+		b, _ := json.MarshalIndent(result, "", "  ")
+		return mcpResp{ID: req.ID, Result: map[string]any{
+			"content":           []map[string]any{{"type": "text", "text": string(b)}},
+			"structuredContent": result, "isError": false,
+		}}
 	case "impact":
 		st := openStore(root)
 		defer st.Close()
@@ -254,13 +323,16 @@ func mcpToolCall(req mcpReq, defaultRoot string) mcpResp {
 			Status: store.StatusCandidate, Provenance: store.ProvenanceAgent, Supersedes: arg("supersedes"),
 			ClaimClass: arg("claim_class"), Evidence: arg("evidence"), Model: os.Getenv("PROJX_MODEL")}
 		rec.ID = kind.String() + "/" + slug(rec.Key)
+		if err := validateAgentKnowledgeCandidate(rec); err != nil {
+			return text("commit refused: "+err.Error(), true)
+		}
 		if before, exists := st.Get(rec.ID); exists && before.Authoritative() {
 			return text("commit refused: agent cannot overwrite authoritative "+rec.ID+"; use a distinct key and set supersedes", true)
 		}
 		if err := st.Put(rec); err != nil {
 			return text("commit failed: "+err.Error(), true)
 		}
-		syncProjectClaudeMD(root, st)
+		syncProjectAgentInstructions(root)
 		return text("committed "+rec.ID, false)
 	default:
 		return mcpResp{ID: req.ID, Error: &mcpErr{Code: -32602, Message: "unknown tool: " + p.Name}}

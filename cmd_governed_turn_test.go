@@ -1,10 +1,8 @@
 package main
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -28,9 +26,15 @@ func TestGovernedTurnRecordsMutationObligation(t *testing.T) {
 	}
 }
 
-func TestGovernedTurnStopVerifiesAndStagesCandidate(t *testing.T) {
+func TestGovernedTurnStopVerifiesWithoutStagingKnowledge(t *testing.T) {
 	root := t.TempDir()
 	seedSessionStore(t, root)
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/governed\n\ngo 1.25.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\nfunc main() { missingSymbol() }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	const sid = "close"
 	handleHook(root, []byte(`{"session_id":"`+sid+`","hook_event_name":"SessionStart"}`))
 	_, errOut, code := handleHook(root, []byte(`{"session_id":"`+sid+`","hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"main.go"}}`))
@@ -46,27 +50,14 @@ func TestGovernedTurnStopVerifiesAndStagesCandidate(t *testing.T) {
 		t.Fatalf("verified mutation obligation was not cleared: %+v", turn)
 	}
 	st := openStore(root)
-	candidate, ok := st.Get("candidate/governed-turn/" + sid)
+	_, ok := st.Get("candidate/governed-turn/" + sid)
 	st.Close()
-	if !ok || candidate.Status != "candidate" || candidate.Provenance != "gate-verified" {
-		t.Fatalf("learn candidate not staged with lifecycle metadata: %+v, ok=%v", candidate, ok)
+	if ok {
+		t.Fatal("verified turn was incorrectly persisted as durable knowledge")
 	}
 }
 
-func TestLearnCandidateSurfacesOnNextPrompt(t *testing.T) {
-	root := t.TempDir()
-	seedSessionStore(t, root)
-	turn := governedTurn{Prompt: "change main", MutatedPaths: []string{"main.go"}}
-	if !stageLearnCandidate(root, "learn", turn) {
-		t.Fatal("stageLearnCandidate failed")
-	}
-	out, _, code := handleHook(root, []byte(`{"session_id":"learn","hook_event_name":"UserPromptSubmit","prompt":"next"}`))
-	if code != 0 || !strings.Contains(out, "candidate, not authority") {
-		t.Fatalf("candidate not surfaced: code=%d out=%q", code, out)
-	}
-}
-
-func TestCrossProjectLearnStagesInEachOwningStore(t *testing.T) {
+func TestCrossProjectGovernedTurnVerifiesWithoutStagingKnowledge(t *testing.T) {
 	t.Setenv("PROJX_YOURS_DIR", t.TempDir())
 	home := t.TempDir()
 	repoA := filepath.Join(home, "repo-a")
@@ -92,45 +83,55 @@ func TestCrossProjectLearnStagesInEachOwningStore(t *testing.T) {
 		t.Fatalf("closeGovernedTurn blocked: %s", msg)
 	}
 
-	for root, want := range map[string]string{repoA: pathA, repoB: pathB} {
-		st := openStore(root)
-		record, ok := st.Get("candidate/governed-turn/cross-learn")
-		st.Close()
-		if !ok {
-			t.Fatalf("candidate missing from owning store %q", root)
-		}
-		var candidate learnCandidate
-		if err := json.Unmarshal([]byte(record.Body), &candidate); err != nil {
-			t.Fatalf("decode candidate in %q: %v", root, err)
-		}
-		if len(candidate.Paths) != 1 || candidate.Paths[0] != want {
-			t.Fatalf("candidate paths in %q = %q, want only %q", root, candidate.Paths, want)
-		}
+	if turn := loadGovernedTurn(home, "cross-learn"); len(turn.MutatedRoots) != 0 || len(turn.MutatedPaths) != 0 {
+		t.Fatalf("verified cross-project obligations were not cleared: %+v", turn)
 	}
-	if st := openStore(home); func() bool { defer st.Close(); _, ok := st.Get("candidate/governed-turn/cross-learn"); return ok }() {
-		t.Fatal("cross-project candidate was incorrectly staged in the session home store")
+	for _, root := range []string{repoA, repoB, home} {
+		st := openStore(root)
+		_, ok := st.Get("candidate/governed-turn/cross-learn")
+		st.Close()
+		if ok {
+			t.Fatalf("verified turn was incorrectly persisted in %q", root)
+		}
 	}
 }
 
-func TestPendingLearnNoticeFollowsActiveProject(t *testing.T) {
-	t.Setenv("PROJX_YOURS_DIR", t.TempDir())
+func TestMutationRootsSkipUserHome(t *testing.T) {
 	home := t.TempDir()
-	repoA := filepath.Join(home, "repo-a")
-	repoB := filepath.Join(home, "repo-b")
-	for _, root := range []string{repoA, repoB} {
-		if err := os.MkdirAll(root, 0o755); err != nil {
-			t.Fatal(err)
-		}
-		seedSessionStore(t, root)
-	}
-	if !stageLearnCandidate(repoB, "project-notice", governedTurn{MutatedPaths: []string{filepath.Join(repoB, "b.go")}}) {
-		t.Fatal("stageLearnCandidate failed")
-	}
+	t.Setenv("HOME", home)
+	t.Setenv("PROJX_YOURS_DIR", filepath.Join(t.TempDir(), "yours"))
+	st := openStore(home)
+	st.Close()
 
-	if notice := pendingLearnNotice(repoB, "project-notice"); !strings.Contains(notice, "candidate, not authority") {
-		t.Fatalf("owning project candidate not surfaced: %q", notice)
+	if roots := mutationRoots(home, nil); len(roots) != 0 {
+		t.Fatalf("session-level home roots = %q, want none", roots)
 	}
-	if notice := pendingLearnNotice(repoA, "project-notice"); notice != "" {
-		t.Fatalf("candidate leaked into a different project's notice: %q", notice)
+	target := filepath.Join(home, "notes.txt")
+	if roots := mutationRoots(home, []string{target}); len(roots) != 0 {
+		t.Fatalf("target-derived home roots = %q, want none", roots)
+	}
+}
+
+func TestCloseGovernedTurnSkipsLegacyUserHomeRoot(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PROJX_YOURS_DIR", filepath.Join(t.TempDir(), "yours"))
+	st := openStore(home)
+	st.Close()
+
+	turn := governedTurn{
+		Recalled:     true,
+		MutatedRoots: []string{home},
+		MutatedPaths: []string{filepath.Join(home, "legacy.txt")},
+	}
+	if !saveGovernedTurn(home, "legacy-home", turn) {
+		t.Fatal("saveGovernedTurn failed")
+	}
+	if msg, blocked := closeGovernedTurn(home, "legacy-home"); blocked {
+		t.Fatalf("legacy home obligation blocked: %s", msg)
+	}
+	turn = loadGovernedTurn(home, "legacy-home")
+	if len(turn.MutatedRoots) != 0 || len(turn.MutatedPaths) != 0 {
+		t.Fatalf("legacy home obligation was not cleared: %+v", turn)
 	}
 }

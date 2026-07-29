@@ -10,3 +10,7 @@ import "syscall"
 func detachSysProcAttr() *syscall.SysProcAttr {
 	return &syscall.SysProcAttr{Setsid: true}
 }
+
+func detachHookWorkerSysProcAttr() *syscall.SysProcAttr {
+	return detachSysProcAttr()
+}

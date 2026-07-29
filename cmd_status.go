@@ -113,17 +113,21 @@ func runStatusCmd(absRoot string, args []string) {
 
 func statusDashboardRequested(args []string) bool {
 	for _, a := range args {
-		if a == "--json" || a == "--compact" || a == "--watch" || a == "--human" || a == "--serve" || a == "--ensure-server" || a == "--show-server" {
+		if a == "--json" || a == "--compact" || a == "--watch" || a == "--human" || a == "--serve" || a == "--ensure-server" || a == "--show-server" || a == "--dashboard" {
 			return true
 		}
 	}
 	return false
 }
 
+func dashboardShortcutRequested(args []string) bool {
+	return len(args) == 1 && args[0] == "--dashboard"
+}
+
 func runStatusDashboard(absRoot string, args []string) {
 	for _, arg := range args {
-		if arg == "--ensure-server" || arg == "--show-server" {
-			if err := ensureStatusServer(absRoot, args, arg == "--show-server"); err != nil {
+		if arg == "--ensure-server" || arg == "--show-server" || arg == "--dashboard" {
+			if err := ensureStatusServer(absRoot, args, arg != "--ensure-server"); err != nil {
 				die("status %s: %v", arg, err)
 			}
 			return

@@ -20,6 +20,18 @@ func TestParseStatusServeOptions(t *testing.T) {
 	}
 }
 
+func TestStatusDashboardShortcutIsRecognized(t *testing.T) {
+	if !statusDashboardRequested([]string{"--dashboard"}) {
+		t.Fatal("--dashboard should select the existing web dashboard")
+	}
+	if !dashboardShortcutRequested([]string{"--dashboard"}) {
+		t.Fatal("top-level --dashboard should route to status")
+	}
+	if dashboardShortcutRequested([]string{"status", "--dashboard"}) {
+		t.Fatal("only the top-level shortcut should use shortcut dispatch")
+	}
+}
+
 func TestStatusDashboardLinkIsMarkdown(t *testing.T) {
 	if got := statusDashboardLink("http://127.0.0.1:47632"); got != "[Open ProjX dashboard](http://127.0.0.1:47632/)" {
 		t.Fatalf("link = %q", got)
@@ -155,6 +167,9 @@ func TestStatusDashboardHandlerRejectsUnknownPath(t *testing.T) {
 func TestLatestStatusSessionFollowsNewestBreadcrumb(t *testing.T) {
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, ".projx"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".projx", "store.db"), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	updateCrumb(root, "older", func(c *statusCrumb) { c.R = root })

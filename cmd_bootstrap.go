@@ -143,12 +143,21 @@ func runGlobalBootstrap() {
 	}
 	configuredBinary = rt.CLI
 	configuredHeadlessBinary = rt.Headless
+	aliasPath, aliasChanged, err := installPublicCommandAlias(home, rt.CLI)
+	if err != nil {
+		die("bootstrap: install projx command: %v", err)
+	}
 
 	fmt.Println("projx bootstrap: preparing the GLOBAL ProjX layer (idempotent)")
 	if copied {
-		fmt.Printf("  engine: activated immutable runtime → %s\n", rt.CLI)
+		fmt.Printf("  engine: activated immutable runtime -> %s\n", rt.CLI)
 	} else {
-		fmt.Printf("  engine: already active → %s\n", rt.CLI)
+		fmt.Printf("  engine: already active -> %s\n", rt.CLI)
+	}
+	if aliasChanged {
+		fmt.Printf("  command: installed projx -> %s\n", aliasPath)
+	} else {
+		fmt.Printf("  command: projx already active -> %s\n", aliasPath)
 	}
 
 	// 1. Merge the lifecycle hook into ~/.claude/settings.json, preserving existing hooks.
@@ -157,7 +166,7 @@ func runGlobalBootstrap() {
 		die("bootstrap: hook merge: %v", err)
 	}
 	if len(added) > 0 {
-		fmt.Printf("  hook: added ProjX entries for %s → %s\n", strings.Join(added, ", "), settingsPath)
+		fmt.Printf("  hook: added ProjX entries for %s -> %s\n", strings.Join(added, ", "), settingsPath)
 	}
 	if len(skipped) > 0 {
 		fmt.Printf("  hook: already present for %s (left as-is)\n", strings.Join(skipped, ", "))
@@ -181,17 +190,17 @@ func runGlobalBootstrap() {
 		die("bootstrap: install skill: %v", err)
 	}
 	if wrote {
-		fmt.Printf("  skill: installed → %s\n", skillPath)
+		fmt.Printf("  skill: installed -> %s\n", skillPath)
 	} else {
-		fmt.Printf("  skill: already up to date → %s\n", skillPath)
+		fmt.Printf("  skill: already up to date -> %s\n", skillPath)
 	}
 	if err := bootstrapCodex(home); err != nil {
 		die("bootstrap: install Codex adapter: %v", err)
 	}
 
-	fmt.Println("\nprojx bootstrap: done. The global ProjX hook now loads on every Claude Code session.")
-	fmt.Println("  • Make the current dir a ProjX project:  projx-engine --root . init")
-	fmt.Println("  • The `projx` skill will bootstrap ProjX automatically on any machine.")
+	fmt.Println("\nprojx bootstrap: done. The global ProjX hook now loads in Codex and Claude Code.")
+	fmt.Println("  - Make the current dir a ProjX project:  projx --root . init")
+	fmt.Println("  - The `projx` skill will bootstrap ProjX automatically on any machine.")
 }
 
 // hookSpec describes one lifecycle event's ProjX hook registration.
@@ -205,7 +214,7 @@ type hookSpec struct {
 // supply the tool names their harness uses for PreToolUse matching.
 func lifecycleHookSpecs(preToolMatcher string) []hookSpec {
 	return []hookSpec{
-		{"SessionStart", "", 30},
+		{"SessionStart", "", 10},
 		{"UserPromptSubmit", "", 15},
 		{"PreToolUse", preToolMatcher, 10},
 		{"PreCompact", "", 15},
@@ -227,7 +236,7 @@ func mergeGlobalHook(settingsPath string) (added, skipped []string, err error) {
 	if data, rerr := os.ReadFile(settingsPath); rerr == nil {
 		if len(bytes.TrimSpace(data)) > 0 {
 			if json.Unmarshal(data, &root) != nil {
-				return nil, nil, fmt.Errorf("%s exists but isn't valid JSON — merge the ProjX hooks by hand", settingsPath)
+				return nil, nil, fmt.Errorf("%s exists but isn't valid JSON; merge the ProjX hooks by hand", settingsPath)
 			}
 		}
 	} else if !os.IsNotExist(rerr) {

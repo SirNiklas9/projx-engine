@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/SirNiklas9/projx-engine/internal/routing"
 	store "github.com/SirNiklas9/projx-store"
 )
 
@@ -25,59 +26,80 @@ type StatusModes struct {
 }
 
 type StatusHealth struct {
-	Store          bool   `json:"store"`
-	MCP            bool   `json:"mcp"`
-	MCPCurrent     bool   `json:"mcp_current"`
-	Hooks          bool   `json:"hooks"`
-	HooksCurrent   bool   `json:"hooks_current"`
-	Binary         bool   `json:"binary"`
-	BinaryStale    bool   `json:"binary_stale"`
-	BinaryPath     string `json:"binary_path,omitempty"`
-	BinaryRevision string `json:"binary_revision,omitempty"`
-	SourceRevision string `json:"source_revision,omitempty"`
-	SourceDirty    bool   `json:"source_dirty,omitempty"`
+	Store              bool   `json:"store"`
+	MCP                bool   `json:"mcp"`
+	MCPCurrent         bool   `json:"mcp_current"`
+	Hooks              bool   `json:"hooks"`
+	HooksCurrent       bool   `json:"hooks_current"`
+	CodexHooks         bool   `json:"codex_hooks"`
+	CodexHooksCurrent  bool   `json:"codex_hooks_current"`
+	ClaudeHooks        bool   `json:"claude_hooks"`
+	ClaudeHooksCurrent bool   `json:"claude_hooks_current"`
+	Binary             bool   `json:"binary"`
+	BinaryStale        bool   `json:"binary_stale"`
+	BinaryPath         string `json:"binary_path,omitempty"`
+	BinaryRevision     string `json:"binary_revision,omitempty"`
+	SourceRevision     string `json:"source_revision,omitempty"`
+	SourceDirty        bool   `json:"source_dirty,omitempty"`
+	Summary            string `json:"summary,omitempty"`
+	Catalog            bool   `json:"catalog"`
+	CatalogFresh       bool   `json:"catalog_fresh"`
+	CatalogAgeMinutes  int    `json:"catalog_age_minutes,omitempty"`
+	UsableProfiles     int    `json:"usable_model_profiles,omitempty"`
 }
 
 type StatusAgent struct {
-	ID        string `json:"id"`
-	Project   string `json:"project"`
-	Root      string `json:"root"`
-	State     string `json:"state"`
-	Operation string `json:"operation"`
-	Role      string `json:"role,omitempty"`
-	Branch    string `json:"branch,omitempty"`
-	Verify    string `json:"verify,omitempty"`
-	Step      int    `json:"step"`
-	Total     int    `json:"total"`
+	ID              string `json:"id"`
+	Project         string `json:"project"`
+	Root            string `json:"root"`
+	State           string `json:"state"`
+	Operation       string `json:"operation"`
+	ProviderCmd     string `json:"provider_cmd,omitempty"`
+	Provider        string `json:"provider,omitempty"`
+	ProviderProfile string `json:"provider_profile,omitempty"`
+	ProviderModel   string `json:"provider_model,omitempty"`
+	ProviderEffort  string `json:"provider_effort,omitempty"`
+	RouteReason     string `json:"route_reason,omitempty"`
+	RouteSource     string `json:"route_source,omitempty"`
+	Selection       string `json:"selection,omitempty"`
+	FailureReason   string `json:"failure_reason,omitempty"`
+	PID             int    `json:"pid,omitempty"`
+	ParentPID       int    `json:"parent_pid,omitempty"`
+	Role            string `json:"role,omitempty"`
+	Branch          string `json:"branch,omitempty"`
+	Verify          string `json:"verify,omitempty"`
+	Step            int    `json:"step"`
+	Total           int    `json:"total"`
 }
 
 type StatusSnapshot struct {
-	GeneratedAt     time.Time     `json:"generated_at"`
-	ActiveRoot      string        `json:"active_root,omitempty"`
-	ProjectName     string        `json:"project_name,omitempty"`
-	PrimaryScope    string        `json:"primary_scope"`
-	ActiveScopes    []string      `json:"active_scopes"`
-	WorkspaceRoot   string        `json:"workspace_root,omitempty"`
-	Project         bool          `json:"project"`
-	RecordCount     int           `json:"record_count"`
-	GlobalRecords   int           `json:"global_records"`
-	WorkspaceRecords int          `json:"workspace_records"`
-	ProjectRecords  int           `json:"project_records"`
-	CandidateCount  int           `json:"candidate_count"`
-	ReviewDueCount  int           `json:"review_due_count"`
-	SupersededCount int           `json:"superseded_count"`
-	RejectedCount   int           `json:"rejected_count"`
-	GateCount       int           `json:"gate_count"`
-	ADRCount        int           `json:"adr_count"`
-	NewestADR       int64         `json:"newest_adr,omitempty"`
-	ADRFresh        bool          `json:"adr_fresh"`
-	ADRAgeDays      int           `json:"adr_age_days,omitempty"`
-	Verification    string        `json:"verification"`
-	Modes           StatusModes   `json:"modes"`
-	Health          StatusHealth  `json:"health"`
-	LastAction      string        `json:"last_action,omitempty"`
-	ContextBytes    int           `json:"context_bytes,omitempty"`
-	Agents          []StatusAgent `json:"agents"`
+	GeneratedAt      time.Time     `json:"generated_at"`
+	ActiveRoot       string        `json:"active_root,omitempty"`
+	ProjectName      string        `json:"project_name,omitempty"`
+	PrimaryScope     string        `json:"primary_scope"`
+	ActiveScopes     []string      `json:"active_scopes"`
+	WorkspaceRoot    string        `json:"workspace_root,omitempty"`
+	Project          bool          `json:"project"`
+	RecordCount      int           `json:"record_count"`
+	GlobalRecords    int           `json:"global_records"`
+	WorkspaceRecords int           `json:"workspace_records"`
+	ProjectRecords   int           `json:"project_records"`
+	CandidateCount   int           `json:"candidate_count"`
+	ReviewDueCount   int           `json:"review_due_count"`
+	SupersededCount  int           `json:"superseded_count"`
+	RejectedCount    int           `json:"rejected_count"`
+	GateCount        int           `json:"gate_count"`
+	ADRCount         int           `json:"adr_count"`
+	NewestADR        int64         `json:"newest_adr,omitempty"`
+	ADRFresh         bool          `json:"adr_fresh"`
+	ADRAgeDays       int           `json:"adr_age_days,omitempty"`
+	Verification     string        `json:"verification"`
+	Modes            StatusModes   `json:"modes"`
+	Health           StatusHealth  `json:"health"`
+	LastAction       string        `json:"last_action,omitempty"`
+	ContextBytes     int           `json:"context_bytes,omitempty"`
+	MapRefreshing    bool          `json:"map_refreshing"`
+	Agents           []StatusAgent `json:"agents"`
 
 	home      string
 	crumb     statusCrumb
@@ -112,9 +134,18 @@ func buildStatusSnapshot(cwd, sid string) StatusSnapshot {
 		}
 	}
 	if home, err := claudeHomeDir(); err == nil {
-		hookCommands := configuredProjxHookCommands(home)
-		s.Health.Hooks = len(hookCommands) > 0
-		s.Health.HooksCurrent = commandsUseBinary(hookCommands, s.Health.BinaryPath)
+		claudeCommands := configuredProjxHookCommandsAt(filepath.Join(home, ".claude", "settings.json"))
+		codexCommands := configuredProjxHookCommandsAt(filepath.Join(home, ".codex", "hooks.json"))
+		s.Health.ClaudeHooks = len(claudeCommands) > 0
+		s.Health.ClaudeHooksCurrent = commandsUseBinary(claudeCommands, s.Health.BinaryPath)
+		s.Health.CodexHooks = len(codexCommands) > 0
+		s.Health.CodexHooksCurrent = commandsUseBinary(codexCommands, s.Health.BinaryPath)
+		s.Health.Hooks = s.Health.ClaudeHooks || s.Health.CodexHooks
+		if s.Health.CodexHooks {
+			s.Health.HooksCurrent = s.Health.CodexHooksCurrent
+		} else {
+			s.Health.HooksCurrent = s.Health.ClaudeHooksCurrent
+		}
 	}
 	s.home = nearestProjxDir(cwd)
 	if s.home == "" {
@@ -151,6 +182,7 @@ func buildStatusSnapshot(cwd, sid string) StatusSnapshot {
 	if s.Project {
 		s.ProjectName = filepath.Base(s.ActiveRoot)
 	}
+	s.MapRefreshing = mapRefreshInProgress(s.ActiveRoot)
 	s.LastAction, s.ContextBytes = s.crumb.A, s.crumb.N
 	st, err := openStoreExistingSafe(storeRoot)
 	if err != nil {
@@ -221,8 +253,46 @@ func buildStatusSnapshot(cwd, sid string) StatusSnapshot {
 	s.Health.MCPCurrent = commandsUseBinary(mcpCommands, s.Health.BinaryPath)
 	s.Health.SourceRevision, s.Health.SourceDirty = engineSourceIdentity(s.ActiveRoot)
 	s.Health.BinaryStale = binaryIdentityStale(s.Health.BinaryRevision, s.Health.SourceRevision, s.Health.SourceDirty)
+	if catalog, err := routing.LoadCatalog(s.ActiveRoot); err == nil && catalog.UpdatedAt > 0 {
+		s.Health.Catalog = true
+		age := time.Since(time.Unix(catalog.UpdatedAt, 0))
+		s.Health.CatalogAgeMinutes = max(0, int(age.Minutes()))
+		s.Health.CatalogFresh = age <= modelCatalogTTL()
+		for _, profile := range catalog.Profiles {
+			if profile.Availability == routing.AvailabilityUsable {
+				s.Health.UsableProfiles++
+			}
+		}
+	}
+	switch {
+	case !s.Health.Store:
+		s.Health.Summary = "store unavailable"
+	case !s.Health.MCPCurrent:
+		s.Health.Summary = "MCP runtime needs attention"
+	case !s.Health.HooksCurrent:
+		s.Health.Summary = "hook runtime needs attention"
+	case !s.Health.CatalogFresh:
+		s.Health.Summary = "model catalog refresh due"
+	case s.Health.SourceDirty:
+		s.Health.Summary = "healthy; source has uninstalled changes"
+	default:
+		s.Health.Summary = "healthy"
+	}
 	for _, a := range gatherRunningAgents(s.ActiveRoot) {
-		sa := StatusAgent{ID: a.m.ID, Project: a.project, Root: a.root, State: a.m.State, Operation: curOpLabel(a), Role: agentRole(a), Branch: branchOf(a.root), Verify: a.m.Verify, Step: a.curIndex, Total: a.total}
+		sa := StatusAgent{ID: a.m.ID, Project: a.project, Root: a.root, State: a.m.State, Operation: curOpLabel(a), Role: agentRole(a), Branch: branchOf(a.root), Verify: a.m.Verify, FailureReason: a.m.FailureReason, PID: a.m.PID, ParentPID: a.m.ParentPID, Step: a.curIndex, Total: a.total}
+		if a.cur != nil {
+			sa.ProviderCmd = a.cur.ProviderCmd
+			sa.Provider = a.cur.Provider
+			sa.ProviderProfile = a.cur.ProviderProfile
+			sa.ProviderModel = a.cur.ProviderModel
+			sa.ProviderEffort = a.cur.ProviderEffort
+			sa.RouteReason = a.cur.RouteReason
+			sa.RouteSource = a.cur.RouteSource
+			sa.Selection = a.cur.Selection
+			if a.cur.PID != 0 {
+				sa.PID, sa.ParentPID = a.cur.PID, a.cur.ParentPID
+			}
+		}
 		s.Agents = append(s.Agents, sa)
 	}
 	return s
@@ -272,7 +342,7 @@ func binaryIdentityStale(binaryRevision, sourceRevision string, sourceDirty bool
 	if binaryRevision == "" || sourceRevision == "" {
 		return false
 	}
-	return sourceDirty || !strings.EqualFold(binaryRevision, sourceRevision)
+	return !strings.EqualFold(binaryRevision, sourceRevision)
 }
 
 func mcpConfigured(root string) bool {
@@ -318,20 +388,26 @@ func configuredProjxHookCommands(home string) []string {
 		filepath.Join(home, ".claude", "settings.json"),
 		filepath.Join(home, ".codex", "hooks.json"),
 	} {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			continue
-		}
-		var root any
-		if json.Unmarshal(data, &root) != nil {
-			continue
-		}
-		walkJSONStrings(root, func(key, value string) {
-			if key == "command" && isProjxHookCmd(value) {
-				commands = append(commands, value)
-			}
-		})
+		commands = append(commands, configuredProjxHookCommandsAt(path)...)
 	}
+	return commands
+}
+
+func configuredProjxHookCommandsAt(path string) []string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var root any
+	if json.Unmarshal(data, &root) != nil {
+		return nil
+	}
+	var commands []string
+	walkJSONStrings(root, func(key, value string) {
+		if key == "command" && isProjxHookCmd(value) {
+			commands = append(commands, value)
+		}
+	})
 	return commands
 }
 
@@ -409,5 +485,32 @@ func renderStatusCompact(s StatusSnapshot) string {
 	if s.Modes.Cage {
 		parts = append(parts, "cage")
 	}
-	return strings.Join(parts, " · ")
+	return strings.Join(parts, " | ")
+}
+
+func renderCodexStatusMessage(s StatusSnapshot) string {
+	if !s.Health.Store {
+		return "ProjX warning | knowledge store unavailable | context may be incomplete"
+	}
+	scope := []string{"global"}
+	if s.WorkspaceRoot != "" {
+		scope = append(scope, filepath.Base(s.WorkspaceRoot))
+	}
+	if s.ProjectName != "" {
+		scope = append(scope, s.ProjectName)
+	}
+	parts := []string{"ProjX ready", strings.Join(scope, " > "), fmt.Sprintf("%d records", s.RecordCount)}
+	if s.Health.HooksCurrent && (!s.Project || s.Health.MCPCurrent) {
+		if s.Project {
+			parts = append(parts, "hooks + MCP healthy")
+		} else {
+			parts = append(parts, "hooks healthy")
+		}
+	} else {
+		parts = append(parts, "integration needs attention")
+	}
+	if s.MapRefreshing {
+		parts = append(parts, "map refreshing in background")
+	}
+	return strings.Join(parts, " | ")
 }

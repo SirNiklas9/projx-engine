@@ -16,7 +16,7 @@ func TestStoreCommitLifecycleDefaultsAndMetadata(t *testing.T) {
 	storeCommit(root, []string{
 		"--kind", "doc", "--key", "observed behavior", "--body", "candidate evidence",
 		"--by", "agent", "--claim-class", "volatile", "--verified-at", "2026-07-21",
-		"--review-after", "2026-08-04", "--verifier", "go test ./...", "--confidence", "80",
+		"--review-after", "2026-08-04", "--verifier", "go test ./...", "--evidence", "go test ./...", "--confidence", "80",
 	})
 	st := openStore(root)
 	candidate, ok := st.Get("doc/observed-behavior")
@@ -41,6 +41,9 @@ func TestStoreCommitLifecycleDefaultsAndMetadata(t *testing.T) {
 	st.Close()
 	if !ok || approved.LifecycleStatus() != store.StatusActive || !approved.Authoritative() {
 		t.Fatalf("human record should be active: %+v, found=%v", approved, ok)
+	}
+	if approved.ClaimClass != "" || approved.Evidence != "" {
+		t.Fatalf("human commit unexpectedly required agent hygiene metadata: %+v", approved)
 	}
 }
 

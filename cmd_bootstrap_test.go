@@ -71,11 +71,11 @@ func TestMergeGlobalHookFreshFile(t *testing.T) {
 	if pre["matcher"] != wantMatcher {
 		t.Errorf("PreToolUse matcher = %v; want %s", pre["matcher"], wantMatcher)
 	}
-	// SessionStart timeout must be 30.
+	// SessionStart is intentionally short because indexing runs in the background.
 	ss := hooks["SessionStart"].([]any)[0].(map[string]any)
 	inner := ss["hooks"].([]any)[0].(map[string]any)
-	if int(inner["timeout"].(float64)) != 30 {
-		t.Errorf("SessionStart timeout = %v; want 30", inner["timeout"])
+	if int(inner["timeout"].(float64)) != 10 {
+		t.Errorf("SessionStart timeout = %v; want 10", inner["timeout"])
 	}
 }
 
@@ -212,8 +212,8 @@ func TestMergeGlobalHookIdempotent(t *testing.T) {
 				}
 			}
 		}
-		if count > 1 {
-			t.Errorf("event %q has %d ProjX commands after re-run; want 1 (no duplication)", ev, count)
+		if count != 1 {
+			t.Errorf("event %q has %d ProjX commands after re-run; want exactly 1", ev, count)
 		}
 	}
 }

@@ -162,10 +162,15 @@ projx-engine --root . init
 ```
 
 This installs the project store + code map + `/projx:*` slash commands + the
-ProjX MCP server. It writes a `CLAUDE.md` and a `.claude/` directory — that is
-expected and managed by ProjX. It does NOT install a per-project hook: the single
-global hook from step 1 does all context injection (a per-project hook would
-double-inject).
+ProjX MCP server. It adds one versioned ProjX block to `AGENTS.md` and a small
+`CLAUDE.md` import block. ProjX never owns either entire file: updates and
+uninstall may change only bytes inside the exact ProjX markers. It does NOT
+install a per-project hook: the single global hook from step 1 does all context
+injection (a per-project hook would double-inject).
+
+After global bootstrap, `projx` is the short interactive command;
+`projx --dashboard` opens the local web dashboard. `projx-engine` remains the
+stable compatibility name used by hooks, MCP registrations, and existing scripts.
 
 For a multi-repo WORKSPACE, run `init --workspace` from the parent folder that holds the
 repos:

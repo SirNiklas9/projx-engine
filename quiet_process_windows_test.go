@@ -24,3 +24,14 @@ func TestDetachSysProcAttrIsDetachedAndQuiet(t *testing.T) {
 		t.Fatalf("CreationFlags = %#x, want %#x", attr.CreationFlags, want)
 	}
 }
+
+func TestDetachHookWorkerBreaksAwayFromContainment(t *testing.T) {
+	want := uint32(createNewProcessGroup | detachedProcess | createNoWindow | createBreakawayFromJob)
+	attr := detachHookWorkerSysProcAttr()
+	if attr == nil {
+		t.Fatal("detachHookWorkerSysProcAttr returned nil")
+	}
+	if attr.CreationFlags != want {
+		t.Fatalf("CreationFlags = %#x, want %#x", attr.CreationFlags, want)
+	}
+}

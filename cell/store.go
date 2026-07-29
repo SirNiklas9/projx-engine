@@ -93,7 +93,7 @@ func handleStorePut(c *pulpgin.Context) {
 		bp = &before
 	}
 	recordStoreOp("put", rec.ID, rec.Kind.String(), rec.Key, bp, &rec)
-	syncClaudeMD(s)
+	syncAgentInstructions()
 	c.JSON(200, pulpgin.H{"ok": true})
 }
 
@@ -116,7 +116,7 @@ func handleStoreDelete(c *pulpgin.Context) {
 	if had {
 		recordStoreOp("delete", id, before.Kind.String(), before.Key, &before, nil)
 	}
-	syncClaudeMD(s)
+	syncAgentInstructions()
 	c.JSON(200, pulpgin.H{"ok": true})
 }
 
@@ -142,7 +142,7 @@ func handleStoreUndo(c *pulpgin.Context) {
 		c.JSON(200, pulpgin.H{"ok": false, "msg": "nothing to undo"})
 		return
 	}
-	syncClaudeMD(s)
+	syncAgentInstructions()
 	c.JSON(200, pulpgin.H{"ok": true, "undid": rev.Seq, "id": rev.ID})
 }
 
@@ -162,11 +162,14 @@ func slugID(s string) string {
 	return strings.Trim(b.String(), "-")
 }
 
-// syncClaudeMD regenerates the managed block in CLAUDE.md from the store via the
-// shared projx-store renderer, written through storage.fs.
-func syncClaudeMD(s store.Store) {
-	const path = "CLAUDE.md"
-	existing, _ := pulp.FS.Read(path)
-	out := store.SpliceManagedBlock(string(existing), store.ManagedBlock(s))
-	_ = pulp.FS.Write(path, []byte(out))
+// syncAgentInstructions refreshes only ProjX-owned blocks in shared files.
+func syncAgentInstructions() {
+	agents, _ := pulp.FS.Read("AGENTS.md")
+	if out, changed, err := store.UpsertProjXManagedBlock(agents, store.AgentInstructionsBlock()); err == nil && changed {
+		_ = pulp.FS.Write("AGENTS.md", out)
+	}
+	claude, _ := pulp.FS.Read("CLAUDE.md")
+	if out, changed, err := store.MigrateClaudeToAgentsImport(claude); err == nil && changed {
+		_ = pulp.FS.Write("CLAUDE.md", out)
+	}
 }

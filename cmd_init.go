@@ -8,7 +8,7 @@ package main
 //      the ProjX lifecycle hook is installed ONCE, GLOBALLY, in ~/.claude/settings.json
 //      and does all injection; a per-project hook would DOUBLE-inject (adr/global-hook-
 //      single-injection). An existing project settings.json is left untouched.
-//   2. registers the ProjX MCP server in <root>/.mcp.json (agent-agnostic pull surface);
+//   2. registers the ProjX MCP server in the selected client's project MCP surface;
 //   3. seeds the store — the universal floor + detected stack (only when the store is
 //      empty), then a DETERMINISTIC smart seed (recipes / off-limits / architecture),
 //      idempotent so re-running never duplicates (adr/seed-beefup-smart-init);
@@ -49,7 +49,7 @@ func mergeMCPServer(absRoot, name string, def map[string]any) (msg string, added
 	cfg := map[string]any{}
 	if data, err := os.ReadFile(path); err == nil {
 		if json.Unmarshal(data, &cfg) != nil {
-			return fmt.Sprintf(".mcp.json exists but isn't valid JSON — add the %q server by hand", name), false
+			return fmt.Sprintf(".mcp.json exists but isn't valid JSON; add the %q server by hand", name), false
 		}
 	}
 	servers, _ := cfg["mcpServers"].(map[string]any)
@@ -72,7 +72,37 @@ func mergeMCPServer(absRoot, name string, def map[string]any) (msg string, added
 	if err := os.WriteFile(path, append(out, '\n'), 0o644); err != nil {
 		return "could not write .mcp.json: " + err.Error(), false
 	}
-	return fmt.Sprintf("MCP server %q registered → .mcp.json", name), true
+	return fmt.Sprintf("MCP server %q registered -> .mcp.json", name), true
+}
+
+// removeMCPServer removes only one named portable MCP registration, preserving
+// every other server in .mcp.json for the clients that use that file.
+func removeMCPServer(absRoot, name string) (bool, error) {
+	path := filepath.Join(absRoot, ".mcp.json")
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	cfg := map[string]any{}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return false, fmt.Errorf("%s exists but isn't valid JSON: %w", path, err)
+	}
+	servers, _ := cfg["mcpServers"].(map[string]any)
+	if servers == nil || servers[name] == nil {
+		return false, nil
+	}
+	delete(servers, name)
+	out, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return false, err
+	}
+	if err := os.WriteFile(path, append(out, '\n'), 0o644); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // mcpBinaryPath resolves the projx-engine path for the MCP `command`: PROJX_ENGINE_BIN if
@@ -92,7 +122,7 @@ func installMCPConfig(absRoot string) string {
 	// path routine the hook uses, so the two can never disagree (see cmd_bootstrap.go).
 	msg, added := mergeMCPServer(absRoot, "projx", map[string]any{"command": mcpBinaryPath(), "args": []string{"mcp"}})
 	if added {
-		return msg + " (any MCP agent: store_query/route/gate_check/impact/store_commit)"
+		return msg + " (any MCP agent: store_query/route/dispatch_run/gate_check/impact/store_commit)"
 	}
 	return msg
 }
@@ -147,23 +177,40 @@ func runInitCmd(absRoot string, args []string) {
 		if err != nil {
 			die("init: install connector: %v", err)
 		}
-		fmt.Printf("init: slash commands installed → %s (%d file(s) written)\n", filepath.Join(absRoot, ".claude"), written)
+		fmt.Printf("init: slash commands installed -> %s (%d file(s) written)\n", filepath.Join(absRoot, ".claude"), written)
 		if note != "" {
 			fmt.Println("init: " + note)
 		}
 
-		// 1b. Register the ProjX MCP server in <root>/.mcp.json — the portable, agent-
-		// AGNOSTIC MCP config, so Claude Code / Cursor / Codex / Cline all get the store
-		// tools (store_query/route/gate_check/store_commit). Additive; merges, never clobbers.
-		if msg := installMCPConfig(absRoot); msg != "" {
-			fmt.Println("init: " + msg)
+	}
+	if codexOnly {
+		if path, err := installCodexProjectConfig(absRoot); err != nil {
+			die("init: install Codex MCP config: %v", err)
+		} else {
+			fmt.Println("init: Codex MCP server registered -> " + path)
 		}
+		if removed, err := removeMCPServer(absRoot, "projx"); err != nil {
+			die("init: remove duplicate portable MCP config: %v", err)
+		} else if removed {
+			fmt.Println("init: removed duplicate portable ProjX MCP registration; Codex config is authoritative")
+		}
+		if workspaceRoot := enclosingWorkspaceConfigRoot(absRoot); workspaceRoot != "" && !sameConfigRoot(workspaceRoot, absRoot) {
+			if removed, err := removeCodexProjectMCPRegistration(workspaceRoot); err != nil {
+				die("init: remove legacy workspace Codex MCP config: %v", err)
+			} else if removed {
+				fmt.Printf("init: removed legacy workspace ProjX MCP registration from %s\n", workspaceRoot)
+			}
+			if _, err := removeMCPServer(workspaceRoot, "projx"); err != nil {
+				die("init: remove legacy workspace portable MCP config: %v", err)
+			}
+		}
+	} else if msg := installMCPConfig(absRoot); msg != "" {
+		fmt.Println("init: " + msg)
 	}
-	if path, err := installCodexProjectConfig(absRoot); err != nil {
-		die("init: install Codex MCP config: %v", err)
-	} else {
-		fmt.Println("init: Codex MCP server registered -> " + path)
+	if err := installProjectAgentInstructions(absRoot); err != nil {
+		die("init: install agent instructions: %v", err)
 	}
+	fmt.Println("init: ProjX instructions managed in AGENTS.md; CLAUDE.md imports them")
 
 	// 2. Seed the store. The floor + stack profiles seed only into a FRESH store (never
 	// clobber declared knowledge); the smart seed then enriches idempotently.
@@ -181,14 +228,14 @@ func runInitCmd(absRoot string, args []string) {
 			fmt.Printf("init: seeded floor%s (%d records)\n", stackSuffix(names), n)
 		}
 	} else {
-		fmt.Println("init: store already has knowledge — floor left as-is (no re-seed)")
+		fmt.Println("init: store already has knowledge; floor left as-is (no re-seed)")
 	}
 
 	// 2a. Smart seed — scan the project and DETERMINISTICALLY seed build/test/run recipes,
 	// the off-limits gate floor, and a high-level architecture summary. Idempotent: it
 	// skips any record that already exists, so re-running init never duplicates.
 	if n, notes := smartSeed(st, absRoot); n > 0 {
-		fmt.Printf("init: smart-seeded %d record(s) — %s\n", n, strings.Join(notes, ", "))
+		fmt.Printf("init: smart-seeded %d record(s): %s\n", n, strings.Join(notes, ", "))
 	}
 	st.Close()
 
@@ -212,6 +259,30 @@ func runInitCmd(absRoot string, args []string) {
 
 	// 4. PATH check + next steps.
 	reportInitNextSteps(codexOnly)
+}
+
+// enclosingWorkspaceConfigRoot returns the nearest workspace boundary so
+// project init can prune legacy workspace MCP registrations. Codex resolves
+// project .codex/config.toml directly; workspace knowledge still composes
+// through that one project-owned server.
+func enclosingWorkspaceConfigRoot(absRoot string) string {
+	dir := absRoot
+	for i := 0; i < 24; i++ {
+		if isWorkspaceRoot(dir) {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return ""
+}
+
+func sameConfigRoot(a, b string) bool {
+	rel, err := filepath.Rel(filepath.Clean(a), filepath.Clean(b))
+	return err == nil && rel == "."
 }
 
 // installConnector writes the embedded connector's slash-command files into <root>/.claude
@@ -264,12 +335,12 @@ func reportInitNextSteps(codexOnly bool) {
 	if codexOnly {
 		fmt.Println("\ninit: Codex ready. Restart Codex to load the project MCP server.")
 		fmt.Println("  - ProjX context is injected by the global hook")
-		fmt.Println("  - MCP tools: store_query, route, gate_check, impact, store_commit")
+		fmt.Println("  - MCP tools: store_query, route, dispatch_run, gate_check, impact, store_commit")
 		return
 	}
-	fmt.Println("\ninit: ready. Open Claude Code in this project — the GLOBAL ProjX hook loads the store automatically.")
-	fmt.Println("  • SessionStart injects the lean floor; each message injects a task-sliced delta")
-	fmt.Println("  • /projx:remember <fact>   save knowledge   • /projx:store   show the store")
-	fmt.Println("  • /projx:route <task>      see the tier     • /projx:gate    list off-limits paths")
-	fmt.Println("  • Global adapters and updates are maintained automatically by the ProjX skill")
+	fmt.Println("\ninit: ready. Open Codex or Claude Code in this project; the global ProjX hook loads the store automatically.")
+	fmt.Println("  - SessionStart injects the lean floor; each message injects a task-sliced delta")
+	fmt.Println("  - /projx:remember <fact>   save knowledge   | /projx:store   show the store")
+	fmt.Println("  - /projx:route <task>      see the tier     | /projx:gate    list off-limits paths")
+	fmt.Println("  - Global adapters and updates are maintained automatically by the ProjX skill")
 }

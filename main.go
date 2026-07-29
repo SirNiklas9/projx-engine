@@ -17,6 +17,10 @@ import (
 )
 
 func main() {
+	// A managed dispatch child on Unix watches its supervisor before any command
+	// can spawn further descendants. Windows gets the same guarantee from a Job.
+	startManagedParentWatcher()
+
 	// Wire the Landlock hook BEFORE calling egress.Init(). When the engine is
 	// re-exec'd as an egress gateway child (NETGW_MODE=child), Init() will call
 	// this hook right before syscall.Exec, applying FS confinement inside the
@@ -30,15 +34,15 @@ func main() {
 	egress.Init()
 
 	// Multi-call (busybox-style) dispatch — MUST be the very first thing in main.
-	// If the binary was invoked under a name other than "projx-engine" AND the
-	// jail has set PROJX_REAL_PATH, this is a shim invocation: route through the
-	// brokered-exec handler instead of the normal CLI.
+	// If the binary was invoked under a name other than a supported ProjX CLI
+	// name AND the jail has set PROJX_REAL_PATH, route through the brokered-exec
+	// handler instead of the normal CLI.
 	// The PROJX_REAL_PATH guard ensures that:
 	//   • Normal CLI use (invoked as "projx-engine") never triggers this path.
 	//   • "go test" binaries (named "*.test") never trigger this path.
 	//   • Only a jail-launched copy (which always has PROJX_REAL_PATH set) does.
 	base := strings.TrimSuffix(strings.ToLower(filepath.Base(os.Args[0])), ".exe")
-	if base != "projx-engine" && os.Getenv("PROJX_REAL_PATH") != "" {
+	if base != "projx-engine" && base != "projx" && os.Getenv("PROJX_REAL_PATH") != "" {
 		runBrokeredExec(base, os.Args[1:]) // never returns (calls os.Exit)
 		return
 	}
@@ -69,14 +73,21 @@ func main() {
 		}
 	}
 
-	if len(args) == 0 {
-		usage()
-		os.Exit(0)
-	}
-
 	absRoot, err := filepath.Abs(root)
 	if err != nil {
 		die("%v", err)
+	}
+	if len(args) == 0 {
+		runHomeCmd(absRoot, nil)
+		return
+	}
+	if len(args) == 1 && args[0] == "--json" {
+		runHomeCmd(absRoot, args)
+		return
+	}
+	if dashboardShortcutRequested(args) {
+		runStatusCmd(absRoot, args)
+		return
 	}
 
 	cmd, rest := args[0], args[1:]
@@ -122,7 +133,12 @@ func main() {
 	case "map":
 		runMapCmd(absRoot, rest)
 	case "route":
+		ensureModelCatalogFresh(absRoot)
 		runRouteCmd(absRoot, rest)
+	case "models":
+		runModelsCmd(absRoot, rest)
+	case "provider":
+		runProviderCmd(absRoot, rest)
 	case "init":
 		runInitCmd(absRoot, rest)
 	case "uninstall":
@@ -138,10 +154,13 @@ func main() {
 	case "agent":
 		runAgentCmd(absRoot, rest)
 	case "run":
+		ensureModelCatalogFresh(absRoot)
 		runRunCmd(absRoot, rest)
 	case "dispatch":
+		ensureModelCatalogFresh(absRoot)
 		runDispatchCmd(absRoot, rest)
 	case "workflow":
+		ensureModelCatalogFresh(absRoot)
 		runWorkflowCmd(absRoot, rest)
 	case "__dispatch-run":
 		// Hidden: the detached background supervisor for `dispatch --run`. Runs the
@@ -153,6 +172,8 @@ func main() {
 		// SAME .projx/runs manifest so `dispatch status`, the badge, and the one-shot
 		// hook surface a detached workflow exactly like a detached dispatch.
 		runWorkflowSupervise(absRoot, rest)
+	case "__map-sync-background":
+		runBackgroundMapSync(absRoot, rest)
 	case "mcp":
 		runMCPCmd(absRoot, rest)
 	case "impact":
@@ -220,10 +241,16 @@ func runConfinedLaunchCmd(args []string) {
 }
 
 func usage() {
-	fmt.Print(`projx-engine — headless engine CLI
+	fmt.Print(`projx - scoped knowledge engine
 
 Usage:
-  projx-engine [--root <dir>] <command> [args]
+  projx [--root <dir>]                         friendly status and next steps
+  projx [--root <dir>] --dashboard             open the web dashboard
+  projx [--root <dir>] --json                  machine-readable status snapshot
+  projx [--root <dir>] <command> [args]
+
+Compatibility:
+  projx-engine remains supported for hooks, MCP, scripts, and existing installs.
 
 Real commands:
   version [--check]                       print the engine version + build revision
@@ -247,8 +274,9 @@ Real commands:
   hook                                     Claude Code lifecycle handler — reads the hook JSON on
                                             stdin and dispatches (SessionStart/UserPromptSubmit/
                                             PreToolUse/PreCompact/Stop). Called by settings.json; no bash.
-  store get <id>                          get a record by id
-  store list [--kind <name>] [--scope ..]  list records
+  store get <id> [--json]                 get a record by id
+  store list [--kind <name>] [--scope ..] [--json]  list records
+  store query <terms> [filters] [--json]  search and rank scoped records
   store commit --kind .. --key .. --body ..  write a record
   store move <id> --to <scope>            move a record between scopes (global|workspace|project), id/history intact
   store rm <id>                           remove a record (journaled)
@@ -261,14 +289,14 @@ Real commands:
                                             reason (soft: dispatcher-mode, confirm-before-push,
                                             commit-style). HARD rules (secrets/off-limits) can't
                                             be overridden.
-  mode <dispatcher|cage> [on|off]         show or toggle a store-declared enforcement mode
+  mode <dispatcher|cage> [on|off] [--json]  show or toggle a store-declared enforcement mode
                                             (no on|off → print state). override-authority is
                                             human-only and cannot be set here.
   focus [<selector>|--clear|--show]       pin which running agent the statusline renders FAT
                                             (match by dispatch id | project | role); no arg
                                             shows it, --clear returns to fat-by-current-scope
   gate add <pattern>                      add a gate rule
-  gate list                               list gate rules
+  gate list [--json]                      list gate rules
   gate rm <id-or-pattern>                 remove a gate rule
   gate check <path>                       exit 0 if allowed, 2 if denied by a gate rule
   verify                                  check declared vs actual boundaries
@@ -282,10 +310,11 @@ Real commands:
                                                                 turn re-sends protocol+law+slice
   session-suggest --session <id>          (Stop) suggest committing a flagged @remember (exit 2)
                                             if nothing was stored; silent otherwise
-  map sync                                parse the project → index every symbol (signature +
+  map sync [--json]                       parse the project → index every symbol (signature +
                                             doc + file:line anchor) into the store as code-map records
-  map list                                show the current code-map records
-  route <task>                            print the tier decision (class+source+cmd); no execution
+  map list [--json]                       show the current code-map records
+  impact <symbol> [--depth N] [--json]    show transitive callers from the indexed code map
+  route <task> [--json]                   print the tier decision (class+source+cmd); no execution
   route pin|floor <tier>                  set a standing pin (hard-lock) or floor (minimum) tier
   route clear pin|floor                   remove a standing routing setting
   route show                              show current pin / floor / keyword signals

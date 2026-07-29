@@ -472,11 +472,7 @@ func nearestProjxDir(dir string) string {
 // (.projx/store.db). A workspace root may still own a .projx runtime directory for
 // routing/cage metadata; that alone must NOT make it a project.
 func isProjxDir(path string) bool {
-	if path == "" {
-		return false
-	}
-	fi, err := os.Stat(filepath.Join(path, ".projx", "store.db"))
-	return err == nil && !fi.IsDir()
+	return isProjectStoreRoot(path)
 }
 
 // statusCrumb is the tiny breadcrumb the hook writes after each event so the status

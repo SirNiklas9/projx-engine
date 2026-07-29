@@ -28,9 +28,10 @@ import (
 
 // fakeAgentSource is the Go source for the scripted fake agent.
 // When run, it prints three lines to stdout:
-//   STORE_CONTEXT_PRESENT=<true|false>
-//   DENIED_BIN_BLOCKED=<true|false>   (or DENIED_BIN_RAN=true if the denied binary ran)
-//   CWD=<working directory>
+//
+//	STORE_CONTEXT_PRESENT=<true|false>
+//	DENIED_BIN_BLOCKED=<true|false>   (or DENIED_BIN_RAN=true if the denied binary ran)
+//	CWD=<working directory>
 //
 // The "denied binary" is "ssh" — it is never in the default allowlist and is
 // guaranteed not to be shimmed by projx-engine. This makes the denial test
@@ -42,9 +43,11 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 )
 
 func main() {
+	fmt.Println("ARGS=" + strings.Join(os.Args[1:], "|"))
 	ctx := os.Getenv("PROJX_STORE_CONTEXT")
 	if ctx != "" {
 		fmt.Println("STORE_CONTEXT_PRESENT=true")
@@ -231,5 +234,68 @@ func TestAgentRunNoAgentFound(t *testing.T) {
 	}
 	if !strings.Contains(stderr, "no agent found") {
 		t.Errorf("expected 'no agent found' in stderr, got: %q", stderr)
+	}
+}
+
+func TestAgentRunInvokesCodexAdapterWithSelectedProfile(t *testing.T) {
+	root := setupTestRoot(t)
+	// Keep the test's fake codex ahead of any desktop-managed runtime.
+	t.Setenv("LOCALAPPDATA", t.TempDir())
+	fakeAgent := buildFakeAgent(t)
+	engineBin := buildEngine(t, t.TempDir())
+	fakeDir := t.TempDir()
+	codexName := "codex"
+	if runtime.GOOS == "windows" {
+		codexName += ".exe"
+	}
+	codexPath := filepath.Join(fakeDir, codexName)
+	data, err := os.ReadFile(fakeAgent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(codexPath, data, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, engineBin, "--root", root, "agent", "run", "--task", "implement the acceptance test", "--", "implement the acceptance test")
+	cmd.Env = append(os.Environ(),
+		"PROJX_CAGE=off", "PROJX_AGENT_CMD=", "PROJX_AGENT=codex",
+		"PROJX_AGENT_MODEL=gpt-5.6-sol", "PROJX_AGENT_EFFORT=ultra",
+		"PATH="+fakeDir+string(os.PathListSeparator)+os.Getenv("PATH"),
+	)
+	var outBuf, errBuf strings.Builder
+	cmd.Stdout, cmd.Stderr = &outBuf, &errBuf
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("Codex adapter launch failed: %v\nstdout=%s\nstderr=%s", err, outBuf.String(), errBuf.String())
+	}
+	got := outBuf.String()
+	for _, want := range []string{
+		"ARGS=--config|sandbox_workspace_write.network_access=true|--config|features.network_proxy.enabled=true|--config|features.network_proxy.domains={ \"api.openai.com\" = \"allow\" }|exec|--model|gpt-5.6-sol|--config|model_reasoning_effort=\"ultra\"|",
+		"--config|sandbox_workspace_write.network_access=true|",
+		"--config|features.network_proxy.enabled=true|",
+		`--config|features.network_proxy.domains={ "api.openai.com" = "allow" }|`,
+		"--sandbox|workspace-write|",
+		"Before acting, read and follow the ProjX execution context",
+		"implement the acceptance test",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("Codex adapter invocation missing %q\nstdout=%s\nstderr=%s", want, got, errBuf.String())
+		}
+	}
+}
+
+func TestPrependProviderRuntimePathPreservesOnlyProviderAndJail(t *testing.T) {
+	env := prependProviderRuntimePath([]string{"PATH=C:\\repo\\.projx\\jail", "OTHER=value"}, `C:\Codex\bin\codex.exe`)
+	var path string
+	for _, kv := range env {
+		if strings.HasPrefix(strings.ToUpper(kv), "PATH=") {
+			path = kv
+		}
+	}
+	want := "PATH=C:\\Codex\\bin" + string(os.PathListSeparator) + "C:\\repo\\.projx\\jail"
+	if path != want {
+		t.Fatalf("provider runtime PATH = %q, want %q", path, want)
 	}
 }

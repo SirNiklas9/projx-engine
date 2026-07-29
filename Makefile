@@ -8,6 +8,7 @@ export GOWORK = off
 
 BIN := projx-engine
 DEST ?= $(HOME)/.local/bin/$(BIN)
+ALIAS ?= $(HOME)/.local/bin/projx
 
 .PHONY: build build-windows install version clean
 
@@ -20,7 +21,10 @@ build-windows:        ## build the paired Windows runtime with required sibling 
 
 install:              ## build + install to ~/.local/bin (git-stamped version)
 	go build -ldflags "$(LDFLAGS)" -o $(DEST) .
+	@printf '#!/bin/sh\nexec "%s" "$$@"\n' "$(DEST)" > "$(ALIAS)"
+	@chmod +x "$(ALIAS)"
 	@echo "installed $(VERSION) -> $(DEST)"
+	@echo "installed public command -> $(ALIAS)"
 
 version:              ## print the version that would be stamped
 	@echo $(VERSION)

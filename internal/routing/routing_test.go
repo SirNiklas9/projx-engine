@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/SirNiklas9/projx-engine/internal/routing"
+	store "github.com/SirNiklas9/projx-store"
 )
 
 // ── DefaultConfig ─────────────────────────────────────────────────────────────
@@ -23,10 +24,10 @@ func TestDefaultConfigHasExpectedClasses(t *testing.T) {
 			t.Errorf("DefaultConfig: missing class %q", c)
 		}
 	}
-	// All default Cmds should be empty (override via config).
+	// Default providers should not hardcode any launch shape.
 	for _, p := range cfg.Providers {
-		if p.Cmd != "" {
-			t.Errorf("DefaultConfig: class %q Cmd = %q, want empty", p.Class, p.Cmd)
+		if p.Cmd != "" || p.Provider != "" || p.Profile != "" || p.Model != "" {
+			t.Errorf("DefaultConfig: class %q unexpectedly hardcoded launch config: %+v", p.Class, p)
 		}
 	}
 }
@@ -74,11 +75,29 @@ func TestLoadConfigMergesProviderOverride(t *testing.T) {
 	if drCmd != "claude --model opus" {
 		t.Errorf("merged deep-reasoning Cmd = %q, want %q", drCmd, "claude --model opus")
 	}
-	// Other classes should retain default empty Cmd.
+	// Other classes should retain default empty launch config.
 	for _, p := range cfg.Providers {
-		if p.Class != "deep-reasoning" && p.Cmd != "" {
-			t.Errorf("class %q Cmd = %q, want empty after merge", p.Class, p.Cmd)
+		if p.Class != "deep-reasoning" && (p.Cmd != "" || p.Provider != "" || p.Profile != "" || p.Model != "") {
+			t.Errorf("class %q unexpectedly changed after merge: %+v", p.Class, p)
 		}
+	}
+}
+
+func TestLoadConfigMergesProviderProfileModelOverride(t *testing.T) {
+	root := t.TempDir()
+	writeTempRouting(t, root, []routing.Provider{
+		{Class: "deep-reasoning", Provider: "codex", Profile: "deep-reasoning", Model: "gpt-5-codex", Effort: "ultra", NativeEffort: "ultra"},
+	})
+	cfg := routing.LoadConfig(root)
+
+	var got routing.Provider
+	for _, p := range cfg.Providers {
+		if p.Class == "deep-reasoning" {
+			got = p
+		}
+	}
+	if got.Provider != "codex" || got.Profile != "deep-reasoning" || got.Model != "gpt-5-codex" {
+		t.Fatalf("merged provider override = %+v", got)
 	}
 }
 
@@ -101,9 +120,9 @@ func TestLoadConfigBadJSONReturnsDefaults(t *testing.T) {
 // ── Decide — deterministic triage ────────────────────────────────────────────
 
 type decideCase struct {
-	task     string
-	wantKind string
-	wantOp   string  // non-empty only for deterministic
+	task      string
+	wantKind  string
+	wantOp    string // non-empty only for deterministic
 	wantClass string // non-empty only for agent
 }
 
@@ -217,6 +236,75 @@ func TestDecideResolvesProviderCmdFromConfig(t *testing.T) {
 	}
 }
 
+func TestDecideResolvesProviderTemplateFromConfig(t *testing.T) {
+	root := t.TempDir()
+	writeTempRouting(t, root, []routing.Provider{
+		{Class: "deep-reasoning", Provider: "codex", Profile: "deep-reasoning", Model: "gpt-5-codex", Effort: "ultra", NativeEffort: "ultra"},
+	})
+	cfg := routing.LoadConfig(root)
+
+	d := routing.Decide("redesign the auth architecture", cfg)
+	if d.Kind != "agent" || d.Class != "deep-reasoning" {
+		t.Fatalf("Decision = %+v", d)
+	}
+	if d.ProviderCmd != "" {
+		t.Fatalf("ProviderCmd = %q, want empty for template-based provider", d.ProviderCmd)
+	}
+	if d.Provider != "codex" || d.Profile != "deep-reasoning" || d.Model != "gpt-5-codex" || d.Effort != "ultra" || d.NativeEffort != "ultra" {
+		t.Fatalf("provider fields not resolved: %+v", d)
+	}
+}
+
+func TestDecideWithStoreOverridesProviderTemplateFromStore(t *testing.T) {
+	root := t.TempDir()
+	writeTempRouting(t, root, []routing.Provider{
+		{Class: "deep-reasoning", Provider: "claude", Profile: "default", Model: "claude-opus"},
+	})
+	cfg := routing.LoadConfig(root)
+	st := store.NewMem()
+	for _, rec := range []store.Record{
+		{ID: "route/store-provider", Kind: store.KRoute, Scope: store.ScopeProject, Key: "setting/route-provider/deep-reasoning", Body: "codex"},
+		{ID: "route/store-profile", Kind: store.KRoute, Scope: store.ScopeProject, Key: "setting/route-profile/deep-reasoning", Body: "deep-reasoning"},
+		{ID: "route/store-model", Kind: store.KRoute, Scope: store.ScopeProject, Key: "setting/route-model/deep-reasoning", Body: "gpt-5-codex"},
+	} {
+		if err := st.Put(rec); err != nil {
+			t.Fatalf("seed store policy: %v", err)
+		}
+	}
+
+	d := routing.DecideWithStore(st, "redesign the auth architecture", cfg, nil)
+	if d.Kind != "agent" || d.Class != "deep-reasoning" {
+		t.Fatalf("Decision = %+v", d)
+	}
+	if d.ProviderCmd != "" {
+		t.Fatalf("ProviderCmd = %q, want empty for template-based provider", d.ProviderCmd)
+	}
+	if d.Provider != "codex" || d.Profile != "deep-reasoning" || d.Model != "gpt-5-codex" {
+		t.Fatalf("store-backed provider fields not resolved: %+v", d)
+	}
+}
+
+func TestDecideWithStoreOverridesProviderCmdFallbackFromStore(t *testing.T) {
+	cfg := routing.DefaultConfig()
+	st := store.NewMem()
+	for _, rec := range []store.Record{
+		{ID: "route/tier", Kind: store.KRoute, Scope: store.ScopeProject, Key: "cheap-fast", Body: ""},
+		{ID: "route/fallback", Kind: store.KRoute, Scope: store.ScopeProject, Key: "setting/route-fallback/cheap-fast", Body: "codex exec --model gpt-5-mini"},
+	} {
+		if err := st.Put(rec); err != nil {
+			t.Fatalf("seed store fallback: %v", err)
+		}
+	}
+
+	d := routing.DecideWithStore(st, "fix this typo in the readme", cfg, nil)
+	if d.Kind != "agent" || d.Class != "cheap-fast" {
+		t.Fatalf("Decision = %+v", d)
+	}
+	if d.ProviderCmd != "codex exec --model gpt-5-mini" {
+		t.Fatalf("ProviderCmd = %q", d.ProviderCmd)
+	}
+}
+
 func TestDecideDefaultProviderCmdIsEmpty(t *testing.T) {
 	cfg := routing.DefaultConfig()
 	d := routing.Decide("implement feature X", cfg)
@@ -238,5 +326,116 @@ func TestDecideAlwaysSetsReason(t *testing.T) {
 		if d.Reason == "" {
 			t.Errorf("Decide(%q): Reason is empty", task)
 		}
+	}
+}
+
+func TestLoadConfigAcceptsUTF8BOM(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, ".projx")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir .projx: %v", err)
+	}
+	data := append([]byte{0xef, 0xbb, 0xbf}, []byte(`{"providers":[{"class":"deep-reasoning","provider":"codex","profile":"deep-reasoning","model":"gpt-5-codex"}]}`)...)
+	if err := os.WriteFile(filepath.Join(dir, "routing.json"), data, 0o644); err != nil {
+		t.Fatalf("write routing.json: %v", err)
+	}
+	cfg := routing.LoadConfig(root)
+	for _, p := range cfg.Providers {
+		if p.Class == "deep-reasoning" {
+			if p.Provider != "codex" || p.Profile != "deep-reasoning" || p.Model != "gpt-5-codex" {
+				t.Fatalf("BOM-prefixed config not loaded: %+v", p)
+			}
+			return
+		}
+	}
+	t.Fatal("deep-reasoning provider missing")
+}
+
+func TestDecideSelectsWeightedProviderCandidateDeterministically(t *testing.T) {
+	cfg := routing.Config{
+		Providers: []routing.Provider{
+			{Class: "default", Provider: "claude", Profile: "balanced", Model: "claude-sonnet", Weight: 1, Quality: 0.7, Cost: 0.2, Latency: 0.3, Reliability: 0.9},
+			{Class: "default", Provider: "codex", Profile: "fast", Model: "gpt-5-mini", Weight: 2, Quality: 0.6, Cost: 0.1, Latency: 0.2, Reliability: 0.95},
+		},
+		Weights: map[string]routing.SelectionWeights{
+			"default": {Quality: 1, Cost: 2, Latency: 1, Reliability: 1},
+		},
+	}
+	d := routing.Decide("implement the requested feature", cfg)
+	if d.Provider != "codex" || d.Profile != "fast" || d.Model != "gpt-5-mini" {
+		t.Fatalf("weighted provider selection = %+v", d)
+	}
+	if d.Capabilities == nil && d.PermissionProfile != "" {
+		t.Fatalf("unexpected provider metadata state: %+v", d)
+	}
+}
+
+func TestGlobalProviderDisablePrecedesProjectPolicyAndCrossProviderFallback(t *testing.T) {
+	cfg := routing.Config{
+		Providers: []routing.Provider{
+			{Class: "deep-reasoning", Provider: "claude", Model: "claude-opus", Weight: 10, AllowCrossProviderFallback: true},
+			{Class: "deep-reasoning", Provider: "codex", Model: "gpt-sol", Weight: 1},
+		},
+		Catalog: routing.ModelCatalog{Profiles: []routing.ModelProfile{
+			{Provider: "claude", Model: "claude-opus", Effort: routing.EffortHigh, NativeEffort: "high", Availability: routing.AvailabilityUsable},
+			{Provider: "codex", Model: "gpt-sol", Effort: routing.EffortHigh, NativeEffort: "high", Availability: routing.AvailabilityUsable},
+		}},
+	}
+	st := store.NewMem()
+	for _, rec := range []store.Record{
+		{ID: "setting/provider-enabled/claude", Key: "setting/provider-enabled/claude", Kind: store.KRoute, Scope: store.ScopeGlobal, Body: "false"},
+		{ID: "setting/route-provider/deep-reasoning", Key: "setting/route-provider/deep-reasoning", Kind: store.KRoute, Scope: store.ScopeProject, Body: "claude"},
+		{ID: "route/deep-reasoning", Key: "deep-reasoning", Kind: store.KRoute, Scope: store.ScopeProject, Body: "claude --model claude-opus"},
+	} {
+		if err := st.Put(rec); err != nil {
+			t.Fatal(err)
+		}
+	}
+	d := routing.DecideWithStore(st, "redesign this difficult architecture", cfg, nil)
+	if d.Provider != "codex" || d.Model != "gpt-sol" {
+		t.Fatalf("disabled Claude escaped the global hard gate: %+v", d)
+	}
+	if d.ProviderCmd != "" {
+		t.Fatalf("disabled Claude escaped through a legacy command: %+v", d)
+	}
+}
+
+func TestLoadConfigPreservesMultipleCandidatesAndWeights(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, ".projx")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"providers":[{"class":"default","provider":"claude","model":"claude-sonnet","weight":1},{"class":"default","provider":"codex","model":"gpt-5-mini","weight":3}],"weights":{"default":{"cost":2,"latency":1}}}`
+	if err := os.WriteFile(filepath.Join(dir, "routing.json"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := routing.LoadConfig(root)
+	count := 0
+	for _, p := range cfg.Providers {
+		if p.Class == "default" {
+			count++
+		}
+	}
+	if count != 2 || cfg.Weights["default"].Cost != 2 {
+		t.Fatalf("multiple candidate config was not preserved: %+v weights=%+v", cfg.Providers, cfg.Weights)
+	}
+	if cfg.Weights["default"].Capability == 0 || cfg.Weights["default"].Efficiency == 0 {
+		t.Fatalf("partial project weights erased built-in objective dimensions: %+v", cfg.Weights["default"])
+	}
+}
+
+func TestCapabilityClassConstrainsNeutralEffortBand(t *testing.T) {
+	cfg := routing.Config{
+		Providers: []routing.Provider{{Class: "deep-reasoning", Provider: "codex"}},
+		Weights:   routing.DefaultConfig().Weights,
+		Catalog: routing.ModelCatalog{Profiles: []routing.ModelProfile{
+			{Provider: "codex", Model: "luna", Effort: routing.EffortLow, NativeEffort: "low", Availability: routing.AvailabilityUsable, Quality: .9},
+			{Provider: "codex", Model: "sol", Effort: routing.EffortHigh, NativeEffort: "high", Availability: routing.AvailabilityUsable, Quality: 1, Capability: 1},
+		}},
+	}
+	d := routing.Decide("investigate a difficult architecture", cfg)
+	if d.Model != "sol" || d.Effort != "high" {
+		t.Fatalf("deep-reasoning did not enforce its effort band: %+v", d)
 	}
 }

@@ -48,7 +48,7 @@ func TestMergeCodexHooksAndProjectConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	configPath := filepath.Join(configDir, "config.toml")
-	if err := os.WriteFile(configPath, []byte("model = \"keep-me\"\n\n[mcp_servers.other]\ncommand = \"other\"\n"), 0o644); err != nil {
+	if err := os.WriteFile(configPath, []byte("model = \"keep-me\"\n\n[mcp_servers.other]\ncommand = \"other\"\n\n[mcp_servers.projx]\ncommand = \"old-projx\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := installCodexProjectConfig(root); err != nil {
@@ -194,11 +194,14 @@ func TestSessionStartLeavesDashboardPresentationToCodexAdapter(t *testing.T) {
 	}
 }
 
-func TestCodexSessionStartCombinesContextAndDashboardMessage(t *testing.T) {
+func TestCodexSessionStartCombinesContextAndNaturalStatusMessage(t *testing.T) {
 	root := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(root, ".projx"), 0o755); err != nil {
+	t.Setenv("PROJX_YOURS_DIR", filepath.Join(t.TempDir(), "yours"))
+	st, err := openStoreSafe(root)
+	if err != nil {
 		t.Fatal(err)
 	}
+	st.Close()
 	data, _ := json.Marshal(map[string]any{
 		"session_id":      "codex-chat",
 		"hook_event_name": "SessionStart",
@@ -215,7 +218,7 @@ func TestCodexSessionStartCombinesContextAndDashboardMessage(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload.SystemMessage != "ProjX live status: http://127.0.0.1:47632/" {
+	if !strings.HasPrefix(payload.SystemMessage, "ProjX ready |") || strings.Contains(payload.SystemMessage, "http://") {
 		t.Fatalf("systemMessage = %q", payload.SystemMessage)
 	}
 	if payload.HookSpecificOutput.HookEventName != "SessionStart" || payload.HookSpecificOutput.AdditionalContext != "project context" {

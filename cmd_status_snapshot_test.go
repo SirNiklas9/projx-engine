@@ -88,6 +88,55 @@ func TestStatusSnapshotShowsFloatingScope(t *testing.T) {
 	}
 }
 
+func TestWorkspaceMarkerWinsOverLegacyRootProjectStore(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("PROJX_YOURS_DIR", filepath.Join(t.TempDir(), "yours"))
+
+	if err := os.MkdirAll(filepath.Join(root, ".projx"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	projectStore, err := store.Open(filepath.Join(root, ".projx", "store.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := projectStore.Put(store.Record{
+		ID: "doc/legacy-root", Kind: store.KDoc, Scope: store.ScopeProject,
+		Key: "legacy-root", Body: "must not compose at the workspace root", Status: store.StatusActive,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	projectStore.Close()
+
+	if err := os.MkdirAll(filepath.Join(root, ".projx-workspace"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	workspaceStore, err := store.Open(filepath.Join(root, ".projx-workspace", "store.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := workspaceStore.Put(store.Record{
+		ID: "doc/workspace-root", Kind: store.KDoc, Scope: store.ScopeWorkspace,
+		Key: "workspace-root", Body: "shared workspace knowledge", Status: store.StatusActive,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	workspaceStore.Close()
+
+	s := buildStatusSnapshot(root, "")
+	if s.Project || s.PrimaryScope != "workspace" {
+		t.Fatalf("workspace root resolved as a project: %+v", s)
+	}
+	if s.ProjectRecords != 0 || s.WorkspaceRecords != 1 {
+		t.Fatalf("workspace root composed stale project records: %+v", s)
+	}
+	if got := nearestProjxDir(root); got != "" {
+		t.Fatalf("nearest project = %q, want none at workspace root", got)
+	}
+	if got := enclosingProjectRoot(filepath.Join(root, "loose")); got != "" {
+		t.Fatalf("enclosing project = %q, want none under workspace root", got)
+	}
+}
+
 func TestStatusSnapshotReportsKnowledgeLifecycle(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("PROJX_YOURS_DIR", filepath.Join(t.TempDir(), "yours"))
@@ -171,7 +220,7 @@ func TestBinaryIdentityStale(t *testing.T) {
 	}{
 		{name: "same revision", binary: "abc123", source: "abc123"},
 		{name: "different revision", binary: "abc123", source: "def456", want: true},
-		{name: "dirty source", binary: "abc123", source: "abc123", dirty: true, want: true},
+		{name: "dirty source is reported separately", binary: "abc123", source: "abc123", dirty: true},
 		{name: "not engine source", binary: "abc123", source: "", dirty: true},
 		{name: "unstamped binary", binary: "", source: "abc123", want: false},
 	}
@@ -241,5 +290,52 @@ func TestEngineBuildInputsDirty(t *testing.T) {
 		if !engineBuildInputsDirty(status) {
 			t.Fatalf("build input was not detected in %q", status)
 		}
+	}
+}
+
+func TestStatusSnapshotIncludesRunningAgentProviderFields(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("PROJX_YOURS_DIR", filepath.Join(t.TempDir(), "yours"))
+	if err := os.MkdirAll(filepath.Join(root, ".projx"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	st, err := openStoreSafe(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+	m := &dispatchManifest{
+		ID:            "d0725-120000-abcd",
+		Message:       "workflow: codex parity",
+		State:         "running",
+		Started:       time.Now(),
+		FailureReason: "provider unavailable; fallback selected",
+		Steps: []dispatchStepStat{{
+			Task:            "harden provider routing",
+			Tier:            "deep-reasoning",
+			Kind:            "agent",
+			State:           "running",
+			Provider:        "codex",
+			ProviderProfile: "deep-reasoning",
+			ProviderModel:   "gpt-5-codex",
+			ProviderEffort:  "ultra",
+			RouteReason:     "explicit deep-reasoning policy",
+			RouteSource:     "pin",
+			Selection:       "exact catalog profile",
+			PID:             42,
+			ParentPID:       7,
+			Role:            "deep-reasoning worker",
+		}},
+	}
+	if err := writeDispatchManifest(root, m); err != nil {
+		t.Fatal(err)
+	}
+	s := buildStatusSnapshot(root, "")
+	if len(s.Agents) != 1 {
+		t.Fatalf("agents = %d, want 1", len(s.Agents))
+	}
+	a := s.Agents[0]
+	if a.Provider != "codex" || a.ProviderProfile != "deep-reasoning" || a.ProviderModel != "gpt-5-codex" || a.ProviderEffort != "ultra" || a.RouteReason == "" || a.RouteSource == "" || a.Selection != "exact catalog profile" || a.PID != 42 || a.ParentPID != 7 || a.FailureReason == "" {
+		t.Fatalf("agent provider fields missing: %+v", a)
 	}
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	store "github.com/SirNiklas9/projx-store"
@@ -109,6 +110,87 @@ func main() { println(Greet()) }
 	// Smart seed: an architecture overview doc lands.
 	if _, ok := st.Get("doc/architecture-overview"); !ok {
 		t.Error("smart seed did not add the architecture overview doc")
+	}
+}
+
+func TestCodexOnlyInitRegistersNativeMCPOnce(t *testing.T) {
+	root := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PROJX_YOURS_DIR", filepath.Join(home, "projx-home"))
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module demo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runInitCmd(root, []string{"--codex"})
+
+	data, err := os.ReadFile(filepath.Join(root, ".codex", "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "[mcp_servers.projx]") {
+		t.Fatal("Codex-only init did not register native ProjX MCP")
+	}
+	if _, err := os.Stat(filepath.Join(root, ".mcp.json")); !os.IsNotExist(err) {
+		t.Fatalf("Codex-only init wrote duplicate portable config: %v", err)
+	}
+}
+
+func TestCodexOnlyProjectInitPrunesLegacyWorkspaceMCP(t *testing.T) {
+	workspace := t.TempDir()
+	root := filepath.Join(workspace, "repo")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PROJX_YOURS_DIR", filepath.Join(home, "projx-home"))
+	if err := os.MkdirAll(filepath.Join(workspace, ".projx-workspace"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, ".codex"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(workspace, ".codex"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	workspaceConfig := "[mcp_servers.projx]\ncommand = \"old-workspace\"\n"
+	if err := os.WriteFile(filepath.Join(workspace, ".codex", "config.toml"), []byte(workspaceConfig), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	workspacePortable := `{"mcpServers":{"projx":{"command":"old-portable"},"other":{"command":"keep"}}}`
+	if err := os.WriteFile(filepath.Join(workspace, ".mcp.json"), []byte(workspacePortable), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	projectConfig := "model = \"keep\"\n\n[mcp_servers.codegraph]\ncommand = \"codegraph\"\n\n[mcp_servers.projx]\ncommand = \"old-project\"\n"
+	if err := os.WriteFile(filepath.Join(root, ".codex", "config.toml"), []byte(projectConfig), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module demo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	runInitCmd(root, []string{"--codex"})
+
+	projectAfter, err := os.ReadFile(filepath.Join(root, ".codex", "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(projectAfter), "[mcp_servers.projx]") {
+		t.Fatal("project did not receive its native ProjX MCP registration")
+	}
+	if !strings.Contains(string(projectAfter), "[mcp_servers.codegraph]") || !strings.Contains(string(projectAfter), "model = \"keep\"") {
+		t.Fatal("project MCP install did not preserve unrelated Codex settings")
+	}
+	workspaceAfter, err := os.ReadFile(filepath.Join(workspace, ".codex", "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(workspaceAfter), "[mcp_servers.projx]") {
+		t.Fatal("workspace kept a duplicate native ProjX MCP registration")
+	}
+	portableAfter, err := os.ReadFile(filepath.Join(workspace, ".mcp.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(portableAfter), `"projx"`) || !strings.Contains(string(portableAfter), `"other"`) {
+		t.Fatal("workspace portable cleanup did not remove only ProjX")
 	}
 }
 

@@ -71,6 +71,8 @@ func main() {
 		"--key", "agent-note",
 		"--body", "hello from agent",
 		"--by", "ui",
+		"--claim-class", "stable",
+		"--evidence", "fake agent integration test",
 	)
 	if commitCode != 0 {
 		fmt.Fprintf(os.Stderr, "commit failed (code %d): %s\n", commitCode, commitOut)
@@ -268,6 +270,8 @@ func TestAgentContextForcesAgentBy(t *testing.T) {
 		"--key", "forced-by-test",
 		"--body", "body text",
 		"--by", "ui", // this must be overridden to "agent"
+		"--claim-class", "stable",
+		"--evidence", "agent context integration test",
 	)
 
 	t.Logf("stdout: %q", stdout)
@@ -300,6 +304,36 @@ func TestAgentContextForcesAgentBy(t *testing.T) {
 	}
 	if rec.Kind != store.KDoc {
 		t.Errorf("Kind = %v, want KDoc", rec.Kind)
+	}
+}
+
+// TestAgentContextRejectsUnevidencedKnowledge verifies that all harnesses hit
+// the same durable-candidate admission rule.
+func TestAgentContextRejectsUnevidencedKnowledge(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".projx"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	engineBin := buildEngine(t, t.TempDir())
+
+	_, stderr, code := runEngineWithAgentContext(t, engineBin, root,
+		"store", "commit",
+		"--kind", "doc",
+		"--key", "turn-progress",
+		"--body", "implemented one slice",
+		"--claim-class", "stable",
+	)
+	if code != 1 || !strings.Contains(stderr, "requires evidence") {
+		t.Fatalf("unevidenced agent commit = code %d, stderr %q; want hygiene rejection", code, stderr)
+	}
+
+	st, err := store.Open(filepath.Join(root, ".projx", "store.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+	if _, ok := st.Get("doc/turn-progress"); ok {
+		t.Fatal("rejected agent knowledge was persisted")
 	}
 }
 

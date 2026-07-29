@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestProvisionManagedBinaryIsImmutableAndIdempotent(t *testing.T) {
@@ -119,5 +120,43 @@ func TestMergeMCPServerRefreshesManagedBinaryPath(t *testing.T) {
 	server := cfg["mcpServers"].(map[string]any)["projx"].(map[string]any)
 	if server["command"] != "new" {
 		t.Fatalf("command = %v", server["command"])
+	}
+}
+
+func TestCleanupOnlyRemovesOldIncompleteManagedArtifacts(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("PROJX_YOURS_DIR", filepath.Join(home, "projx-home"))
+	root := managedBinaryRoot(home)
+	complete := filepath.Join(root, "complete")
+	incomplete := filepath.Join(root, "incomplete")
+	if err := os.MkdirAll(complete, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(incomplete, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cli := "projx-engine"
+	headless := cli
+	if runtime.GOOS == "windows" {
+		cli += ".exe"
+		headless += "-headless.exe"
+	}
+	for _, path := range []string{filepath.Join(complete, cli), filepath.Join(complete, headless), filepath.Join(incomplete, cli)} {
+		if err := os.WriteFile(path, []byte("x"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old := time.Now().Add(-48 * time.Hour)
+	_ = os.Chtimes(complete, old, old)
+	_ = os.Chtimes(incomplete, old, old)
+	stale, err := cleanupStaleManagedArtifacts(home, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stale) != 1 || stale[0] != incomplete {
+		t.Fatalf("stale = %v", stale)
+	}
+	if !fileExists(filepath.Join(complete, cli)) || fileExists(incomplete) {
+		t.Fatalf("cleanup removed complete runtime or retained incomplete one")
 	}
 }

@@ -78,6 +78,25 @@ func TestHandleHookLifecycle(t *testing.T) {
 	}
 }
 
+func TestSessionStartDoesNotSynchronouslyBuildCodeMap(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("PROJX_YOURS_DIR", filepath.Join(t.TempDir(), "yours"))
+	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package sample\nfunc SlowIndexTarget() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st := openStore(root)
+	st.Close()
+
+	if _, _, code := handleHook(root, []byte(`{"session_id":"fast","hook_event_name":"SessionStart"}`)); code != 0 {
+		t.Fatalf("SessionStart code = %d", code)
+	}
+	st = openStore(root)
+	defer st.Close()
+	if got := len(st.List(store.OfKind(store.KDeclaredStructure))); got != 0 {
+		t.Fatalf("SessionStart synchronously indexed %d symbol(s)", got)
+	}
+}
+
 func TestDecodeLifecycleEventHarnessParity(t *testing.T) {
 	claude := decodeLifecycleEvent([]byte(`{
 		"session_id":"same", "hook_event_name":"PreToolUse", "cwd":"C:/work",
@@ -103,6 +122,22 @@ func TestDecodeLifecycleEventHarnessParity(t *testing.T) {
 		if claudeTargets[i] != codexTargets[i] {
 			t.Fatalf("target normalization differs: Claude=%v Codex=%v", claudeTargets, codexTargets)
 		}
+	}
+}
+
+func TestCodexAndCLIReceiveEquivalentPromptContext(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("PROJX_YOURS_DIR", filepath.Join(t.TempDir(), "yours"))
+	seedSessionStore(t, root)
+
+	claudePayload := []byte(`{"session_id":"claude-parity","hook_event_name":"UserPromptSubmit","cwd":"` + filepath.ToSlash(root) + `","prompt":"fix the minecraft login backend"}`)
+	codexPayload := []byte(`{"session_id":"codex-parity","hook_event_name":"UserPromptSubmit","cwd":"` + filepath.ToSlash(root) + `","prompt":"fix the minecraft login backend"}`)
+	claudeContext, claudeErr, claudeCode := handleHook(root, claudePayload)
+	codexContext, codexErr, codexCode := handleHook(root, codexPayload)
+
+	if claudeCode != codexCode || claudeErr != codexErr || claudeContext != codexContext {
+		t.Fatalf("context drift:\nClaude code=%d err=%q\n%s\nCodex code=%d err=%q\n%s",
+			claudeCode, claudeErr, claudeContext, codexCode, codexErr, codexContext)
 	}
 }
 

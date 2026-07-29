@@ -6,9 +6,10 @@ import "syscall"
 
 // Windows process-creation flags (not exported by the syscall package by name).
 const (
-	createNewProcessGroup = 0x00000200 // CREATE_NEW_PROCESS_GROUP
-	detachedProcess       = 0x00000008 // DETACHED_PROCESS
-	createNoWindow        = 0x08000000 // CREATE_NO_WINDOW
+	createNewProcessGroup  = 0x00000200 // CREATE_NEW_PROCESS_GROUP
+	detachedProcess        = 0x00000008 // DETACHED_PROCESS
+	createNoWindow         = 0x08000000 // CREATE_NO_WINDOW
+	createBreakawayFromJob = 0x01000000 // CREATE_BREAKAWAY_FROM_JOB
 )
 
 // detachSysProcAttr returns the SysProcAttr that detaches a spawned supervisor
@@ -16,4 +17,10 @@ const (
 // survives the foreground `dispatch --run` returning.
 func detachSysProcAttr() *syscall.SysProcAttr {
 	return &syscall.SysProcAttr{CreationFlags: createNewProcessGroup | detachedProcess | createNoWindow}
+}
+
+// Hook maintenance workers explicitly leave the hook's kill-on-close job.
+// Ordinary hook children never receive this flag and remain contained.
+func detachHookWorkerSysProcAttr() *syscall.SysProcAttr {
+	return &syscall.SysProcAttr{CreationFlags: createNewProcessGroup | detachedProcess | createNoWindow | createBreakawayFromJob}
 }

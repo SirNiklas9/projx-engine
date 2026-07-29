@@ -60,7 +60,7 @@ func (s *controlServer) handleKnowledgeMerge(w http.ResponseWriter, r *http.Requ
 			persisted++
 		}
 	}
-	syncProjectClaudeMD(root, st)
+	syncProjectAgentInstructions(root)
 	writeJSONResp(w, map[string]any{
 		"ok": true, "incoming": len(req.Records), "persisted": persisted,
 		"added": res.Added, "unchanged": res.Unchanged, "autoResolved": res.AutoWon, "needsReview": res.NeedReview,

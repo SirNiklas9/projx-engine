@@ -146,3 +146,32 @@ func TestRefreshReconciliationReplacesExistingCheckpoint(t *testing.T) {
 		t.Fatalf("replacement checkpoint unreadable: %v", err)
 	}
 }
+
+func TestPreToolUsePreservesReconciliationGate(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("PROJX_YOURS_DIR", filepath.Join(t.TempDir(), "yours"))
+	st := openStore(root)
+	err := st.Put(store.Record{
+		ID: "doc/auth", Kind: store.KDoc, Scope: store.ScopeProject,
+		Key: "internal/auth.go", Body: "stale body must not be injected",
+		Status: store.StatusActive, Provenance: store.ProvenanceHuman,
+		ReviewAfter: time.Now().Add(-time.Hour).UnixMilli(), Evidence: "internal/auth.go",
+	})
+	st.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, errOut, code := handleHook(root, []byte(`{"session_id":"gate","hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"internal/auth.go"}}`))
+	if code != 2 || !strings.Contains(errOut, "ProjX reconciliation gate") || !strings.Contains(errOut, "doc/auth") {
+		t.Fatalf("relevant stale target = code %d, stderr %q; want reconciliation block", code, errOut)
+	}
+	if strings.Contains(errOut, "stale body must not be injected") {
+		t.Fatal("reconciliation gate leaked stale body")
+	}
+
+	_, errOut, code = handleHook(root, []byte(`{"session_id":"gate","hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"README.md"}}`))
+	if code != 0 {
+		t.Fatalf("unrelated target = code %d, stderr %q; want allowed", code, errOut)
+	}
+}

@@ -116,11 +116,17 @@ func (c appcontainerConfiner) LaunchConfined(policy Policy, argv []string, env [
 	env = windowsInjectSecrets(env)
 
 	// ── Step 3: build SECURITY_CAPABILITIES ─────────────────────────────────
+	capabilities, err := appContainerCapabilities(env)
+	if err != nil {
+		return 0, fmt.Errorf("confine/windows: AppContainer capabilities: %w", err)
+	}
 	secCaps := securityCapabilities{
 		AppContainerSid: sid,
-		Capabilities:    nil,
-		CapabilityCount: 0,
 		Reserved:        0,
+	}
+	if len(capabilities) > 0 {
+		secCaps.Capabilities = &capabilities[0]
+		secCaps.CapabilityCount = uint32(len(capabilities))
 	}
 
 	// ── Step 4: build PROC_THREAD_ATTRIBUTE_LIST ─────────────────────────────
@@ -204,6 +210,12 @@ func (c appcontainerConfiner) LaunchConfined(policy Policy, argv []string, env [
 	}
 	defer windows.CloseHandle(pi.Thread)
 	defer windows.CloseHandle(pi.Process)
+	job, err := attachKillOnCloseJob(pi.Process)
+	if err != nil {
+		_ = windows.TerminateProcess(pi.Process, 1)
+		return 0, fmt.Errorf("confine/windows: contain child process: %w", err)
+	}
+	defer windows.CloseHandle(job)
 
 	// ── Step 9: wait for child ────────────────────────────────────────────────
 	if _, waitErr := windows.WaitForSingleObject(pi.Process, windows.INFINITE); waitErr != nil {
@@ -216,6 +228,50 @@ func (c appcontainerConfiner) LaunchConfined(policy Policy, argv []string, env [
 	}
 
 	return int(exitCode), nil
+}
+
+// appContainerCapabilities grants InternetClient only when the launcher has
+// explicitly requested provider egress. AppContainer has no hostname-scoped
+// network capability; hostname policy remains cooperative until a proxy or a
+// Windows Firewall rule layer is introduced.
+func appContainerCapabilities(env []string) ([]windows.SIDAndAttributes, error) {
+	for _, kv := range env {
+		if !strings.HasPrefix(strings.ToUpper(kv), "PROJX_BROKER_ALLOW_HOSTS=") {
+			continue
+		}
+		if strings.TrimSpace(kv[len("PROJX_BROKER_ALLOW_HOSTS="):]) == "" {
+			return nil, nil
+		}
+		sid, err := windows.CreateWellKnownSid(windows.WinCapabilityInternetClientSid)
+		if err != nil {
+			return nil, err
+		}
+		return []windows.SIDAndAttributes{{Sid: sid, Attributes: windows.SE_GROUP_ENABLED}}, nil
+	}
+	return nil, nil
+}
+
+func attachKillOnCloseJob(process windows.Handle) (windows.Handle, error) {
+	job, err := windows.CreateJobObject(nil, nil)
+	if err != nil {
+		return 0, fmt.Errorf("create job: %w", err)
+	}
+	info := windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION{}
+	info.BasicLimitInformation.LimitFlags = windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+	if _, err := windows.SetInformationJobObject(
+		job,
+		windows.JobObjectExtendedLimitInformation,
+		uintptr(unsafe.Pointer(&info)),
+		uint32(unsafe.Sizeof(info)),
+	); err != nil {
+		_ = windows.CloseHandle(job)
+		return 0, fmt.Errorf("configure job: %w", err)
+	}
+	if err := windows.AssignProcessToJobObject(job, process); err != nil {
+		_ = windows.CloseHandle(job)
+		return 0, fmt.Errorf("assign child to job: %w", err)
+	}
+	return job, nil
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────

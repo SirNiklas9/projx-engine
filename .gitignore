@@ -12,6 +12,16 @@
 /data-*/
 /dist/
 
+# generated local agent integrations and caches
+/.claude/
+/.codegraph/
+/.codex/
+/.codex-remote-attachments/
+/.mcp.json
+/AGENTS.md
+/CLAUDE.md
+/.tmp*/
+
 # local workspace file — the module builds via go.mod replace directives
 go.work
 go.work.sum

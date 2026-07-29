@@ -26,6 +26,7 @@ import (
 // bypass — exactly what the delegation model forbids. Toggle it out-of-band as a
 // human via `store commit --key setting/override-authority`, never through `mode`.
 func runModeCmd(absRoot string, args []string) {
+	args, jsonOut := takeJSONFlag(args)
 	if len(args) == 0 {
 		die("usage: mode <dispatcher|cage> [on|off]")
 	}
@@ -48,6 +49,10 @@ func runModeCmd(absRoot string, args []string) {
 
 	// No value → report current state, no write.
 	if len(args) == 1 {
+		if jsonOut {
+			writeCLIJSON(map[string]any{"setting": key, "state": modeState(st, key)})
+			return
+		}
 		fmt.Printf("%s: %s\n", key, modeState(st, key))
 		return
 	}
@@ -67,6 +72,10 @@ func runModeCmd(absRoot string, args []string) {
 		die("put: %v", err)
 	}
 	recordStoreOp(absRoot, "put", "ui", bp, &rec)
+	if jsonOut {
+		writeCLIJSON(map[string]any{"ok": true, "setting": key, "state": body})
+		return
+	}
 	fmt.Printf("%s: %s\n", key, body)
 }
 

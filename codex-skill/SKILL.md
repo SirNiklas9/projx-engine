@@ -16,18 +16,25 @@ Codex automatically. Its MCP server exposes deterministic pull tools.
 
 1. Before broad repository discovery, query `store_query` for the relevant
    concept, symbol, convention, or decision.
-2. Use `impact` before changing a widely used symbol.
-3. Treat a denied gate as authoritative. Never work around it.
-4. Save durable discoveries with `store_commit`; do not create a markdown memory
+2. When dispatcher mode is on, COORDINATOR implementation work MUST call the
+   ProjX `dispatch_run` MCP tool and return the resulting run to the user. A
+   dispatched worker (`PROJX_ROLE=worker` or `PROJX_AGENT_CONTEXT=1`) MUST
+   implement its assigned task directly and MUST NOT dispatch it again. The
+   coordinator must not edit files directly after calling the read-only `route`
+   tool. `route` previews a decision; it does not execute or switch models.
+3. Use `impact` before changing a widely used symbol.
+4. Treat a denied gate as authoritative. Never work around it.
+5. Save durable discoveries with `store_commit`; do not create a markdown memory
    file when the fact belongs in ProjX.
-5. Use `route` when the user asks ProjX to choose the appropriate work tier.
+6. Use `route` only when the user asks to preview the appropriate work tier.
 
-## Codex GUI status dashboard
+## Codex status
 
-The Codex-only `SessionStart` adapter emits one visible system message with the
-live ProjX dashboard URL for each new task covered by a global, workspace, or
-project store. The lifecycle hook's knowledge output remains silent model
-context, and other harnesses do not receive this presentation behavior.
+The Codex-only `SessionStart` adapter emits one compact native status message
+showing the active scope, knowledge count, integration health, and whether the
+code map is refreshing in the background. It never starts or advertises a
+browser dashboard automatically. The lifecycle hook's knowledge output remains
+model context, and other harnesses do not receive this presentation behavior.
 
 When the user asks to show, open, refresh, or inspect the ProjX dashboard in
 Codex:
@@ -44,10 +51,10 @@ Codex:
    Codex sidebar. Do not claim that ProjX owns permanent Codex application
    chrome; the supported GUI is the pinned interactive task.
 
-For a persistent dashboard without chat, run `projx-engine status --serve`. It
-opens a loopback-only browser dashboard that refreshes from the same snapshot.
-Use `--no-open` to print the URL without launching a browser. The terminal
-fallbacks are `--compact`, `--watch`, and `--json`.
+The browser dashboard is explicit: run `projx --dashboard` only when the user
+asks to open it. The compatibility form is `projx-engine status --serve`;
+use its `--no-open` option to print the URL without launching a browser.
+Terminal views are `status --compact`, `status --watch`, and `--json`.
 
 ## Setup
 

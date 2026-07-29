@@ -1,7 +1,7 @@
 // Command projxenginecell is the ProjX ENGINE as a Pulp cell — the control-plane
 // BRAIN. It runs as WASM on the Pulp host: the declared-knowledge store and its
 // API served over transport.http.inbound, persistence via storage.sqlite, files
-// (CLAUDE.md + the history journal) via storage.fs.
+// (AGENTS.md, the CLAUDE.md import shim, and history) via storage.fs.
 //
 // The CAGE (Landlock/AppContainer/netns) is NOT compiled into this cell — it is
 // irreducibly native "hands". The cell reaches it as a Pulp CAPABILITY
@@ -31,7 +31,7 @@ func init() {
 		if s, err := openStore(); err == nil {
 			if len(s.List(store.InScope(store.ScopeProject))) == 0 {
 				store.SeedFloor(s)
-				syncClaudeMD(s)
+				syncAgentInstructions()
 			}
 		}
 		r := pulpgin.New()

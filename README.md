@@ -50,16 +50,37 @@ console window.
 cd /path/to/your/project
 projx-engine init          # installs the connector, seeds the floor, indexes the code
 ```
-That's it. Open Claude Code in that folder and it just works: each turn gets the lean
+That's it. Open Codex or Claude Code in that folder and it just works: each turn gets the lean
 floor + the sliced-to-your-task context, off-limits paths are blocked, and `/projx:*`
 slash commands are available.
+
+After global bootstrap, use the short `projx` command for daily work. The
+`projx-engine` name remains supported for existing hooks, MCP registrations,
+scripts, and release compatibility.
+
+```bash
+projx                       # friendly scope and health summary
+projx --dashboard           # open the local web dashboard
+projx store query "billing"
+```
+
+After global bootstrap, use the short `projx` command for daily work. The
+`projx-engine` name remains supported for existing hooks, MCP registrations,
+scripts, and release compatibility.
+
+```bash
+projx                       # friendly scope and health summary
+projx --dashboard           # open the local web dashboard
+projx store query "billing"
+```
 
 **Multi-repo project?** Declare the repos once:
 ```sh
 projx-engine init                                   # in a workspace folder
 projx-engine map sync ../Evolution ../Frontend ../Api   # index them into one store
 ```
-From then on the SessionStart refresh keeps them indexed, and **focus auto-tracks the
+From then on SessionStart injects immediately while a deduplicated background refresh
+keeps the map indexed, and **focus auto-tracks the
 repo you're editing** (edit `Evolution/…` → its context leads; jump to `Frontend/…` → it
 shifts). Override with `@focus <repo>` / `@unfocus`.
 
@@ -168,8 +189,8 @@ one-shot agent binary you already run). Nothing in ProjX's logic is vendor-speci
 `settings.json` points every Claude Code hook at one Go command — `projx-engine hook`
 (no bash, no `jq`; cross-platform):
 
-- **SessionStart** → refresh the code-map, inject the **lean floor** (the protocol + the
-  binding law: conventions + off-limits gates).
+- **SessionStart** → inject the **lean floor** immediately, then refresh the code map
+  in the background (the protocol + binding law: conventions + off-limits gates).
 - **UserPromptSubmit** → inject the **delta**: the law re-asserted + only the new/changed
   records relevant to *this* message (ranked, capped, balanced across repos, focused on
   your active repo). Already-seen records aren't re-sent.

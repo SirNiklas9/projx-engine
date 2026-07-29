@@ -25,16 +25,18 @@ import (
 
 // dispatchManifest is the on-disk record of one backgrounded dispatch run.
 type dispatchManifest struct {
-	ID       string             `json:"id"`
-	Message  string             `json:"message"`
-	State    string             `json:"state"` // running | done | failed
-	Started  time.Time          `json:"started"`
-	Finished time.Time          `json:"finished,omitempty"`
-	Steps    []dispatchStepStat `json:"steps"`
-	Verify   string             `json:"verify,omitempty"` // "" | passed | failed | skipped
-	Reported bool               `json:"reported"`         // surfaced to the trunk yet?
-	PID      int                `json:"pid,omitempty"`
-	Parallel bool               `json:"parallel,omitempty"` // workflow: deterministic write-disjoint waves enabled
+	ID            string             `json:"id"`
+	Message       string             `json:"message"`
+	State         string             `json:"state"` // running | done | failed | cancelled
+	Started       time.Time          `json:"started"`
+	Finished      time.Time          `json:"finished,omitempty"`
+	Steps         []dispatchStepStat `json:"steps"`
+	Verify        string             `json:"verify,omitempty"` // "" | passed | failed | skipped
+	Reported      bool               `json:"reported"`         // surfaced to the trunk yet?
+	PID           int                `json:"pid,omitempty"`
+	ParentPID     int                `json:"parent_pid,omitempty"`
+	Parallel      bool               `json:"parallel,omitempty"` // workflow: deterministic write-disjoint waves enabled
+	FailureReason string             `json:"failure_reason,omitempty"`
 }
 
 // dispatchStepStat is one step's routing + live status inside a manifest.
@@ -45,14 +47,25 @@ type dispatchManifest struct {
 // detached workflow exactly like a detached dispatch. A plain dispatch leaves them
 // empty (all omitempty), so its on-disk shape is byte-for-byte unchanged.
 type dispatchStepStat struct {
-	Task        string `json:"task"`
-	Tier        string `json:"tier"`
-	Kind        string `json:"kind"` // agent | deterministic
-	Op          string `json:"op,omitempty"`
-	ProviderCmd string `json:"provider_cmd,omitempty"`
-	Role        string `json:"role,omitempty"`    // per-worker ProjX scope: role the worker plays
-	State       string `json:"state"`             // pending | running | done | failed
-	Mutated     string `json:"mutated,omitempty"` // yes | no | unknown — did the step CHANGE the working tree?
+	Task            string    `json:"task"`
+	Tier            string    `json:"tier"`
+	Kind            string    `json:"kind"` // agent | deterministic
+	Op              string    `json:"op,omitempty"`
+	ProviderCmd     string    `json:"provider_cmd,omitempty"`
+	Provider        string    `json:"provider,omitempty"`
+	ProviderProfile string    `json:"provider_profile,omitempty"`
+	ProviderModel   string    `json:"provider_model,omitempty"`
+	ProviderEffort  string    `json:"provider_effort,omitempty"`
+	RouteReason     string    `json:"route_reason,omitempty"`
+	RouteSource     string    `json:"route_source,omitempty"`
+	Selection       string    `json:"selection,omitempty"`
+	Role            string    `json:"role,omitempty"` // per-worker ProjX scope: role the worker plays
+	State           string    `json:"state"`          // pending | running | done | failed
+	PID             int       `json:"pid,omitempty"`  // managed ProjX child PID for this step
+	ParentPID       int       `json:"parent_pid,omitempty"`
+	Started         time.Time `json:"started,omitempty"`
+	Finished        time.Time `json:"finished,omitempty"`
+	Mutated         string    `json:"mutated,omitempty"` // yes | no | unknown — did the step CHANGE the working tree?
 
 	ID     string   `json:"id,omitempty"`     // workflow: the step's handle (dep target)
 	Deps   []string `json:"deps,omitempty"`   // workflow: ids that must complete first
@@ -182,12 +195,19 @@ func startDetachedDispatch(absRoot string, steps []dispatchStep, message string)
 	}
 	for _, s := range steps {
 		stat := dispatchStepStat{
-			Task:        s.Task,
-			Tier:        stepTier(s.Decision),
-			Kind:        s.Decision.Kind,
-			Op:          s.Decision.Op,
-			ProviderCmd: s.Decision.ProviderCmd,
-			State:       "pending",
+			Task:            s.Task,
+			Tier:            stepTier(s.Decision),
+			Kind:            s.Decision.Kind,
+			Op:              s.Decision.Op,
+			ProviderCmd:     s.Decision.ProviderCmd,
+			Provider:        s.Decision.Provider,
+			ProviderProfile: s.Decision.Profile,
+			ProviderModel:   s.Decision.Model,
+			ProviderEffort:  firstNonEmpty(s.Decision.NativeEffort, s.Decision.Effort),
+			RouteReason:     s.Decision.Reason,
+			RouteSource:     s.Decision.Source,
+			Selection:       s.Decision.Selection,
+			State:           "pending",
 		}
 		stat.Role = workerRoleForStep(stat) // per-worker ProjX scope (role) computed up front
 		m.Steps = append(m.Steps, stat)
@@ -221,14 +241,27 @@ func startDetachedDispatch(absRoot string, steps []dispatchStep, message string)
 		fmt.Fprintf(os.Stderr, "dispatch: cannot start supervisor: %v\n", err)
 		os.Exit(1)
 	}
-	m.PID = cmd.Process.Pid
-	_ = writeDispatchManifest(absRoot, m)
 	// Release, never Wait — waiting would re-pin the trunk, defeating the purpose.
 	_ = cmd.Process.Release()
+	// The supervisor exclusively owns manifest state after Start. Writing the
+	// launcher's stale copy can overwrite a very fast completed run back to
+	// "running", so wait briefly for the supervisor's durable PID claim.
+	waitForDispatchClaim(absRoot, id, 2*time.Second)
 
 	fmt.Printf("\ndispatch %s started — %d task(s) running in the background. Trunk is free.\n", id, len(steps))
 	fmt.Printf("  status: projx-engine dispatch status %s\n", id)
 	fmt.Printf("  log:    %s\n", dispatchLogPath(absRoot, id))
+}
+
+func waitForDispatchClaim(absRoot, id string, timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if current, err := readDispatchManifest(absRoot, id); err == nil &&
+			(current.PID != 0 || current.State != "running") {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 // runDispatchSupervise is the detached background worker (`__dispatch-run <id>`).
@@ -238,12 +271,17 @@ func runDispatchSupervise(absRoot string, args []string) {
 		os.Exit(1)
 	}
 	id := args[0]
+	if err := containDispatchDescendants(); err != nil {
+		fmt.Fprintf(os.Stderr, "dispatch-run: cannot contain managed children: %v\n", err)
+		os.Exit(1)
+	}
 	m, err := readDispatchManifest(absRoot, id)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "dispatch-run: cannot load manifest %s: %v\n", id, err)
 		os.Exit(1)
 	}
 	m.PID = os.Getpid()
+	m.ParentPID = os.Getppid()
 	_ = writeDispatchManifest(absRoot, m)
 
 	self, _ := os.Executable()
@@ -262,7 +300,7 @@ func runDispatchSupervise(absRoot string, args []string) {
 
 		var stepErr error
 		if st.Kind == "deterministic" {
-			stepErr = runDispatchChild(self, absRoot, deterministicStepArgs(st.Op), "", nil)
+			stepErr = runDispatchChild(self, absRoot, deterministicStepArgs(st.Op), "", "", "", "", "", "", nil, dispatchStepStarted(absRoot, m, st))
 		} else {
 			agentWork = true
 			// Per-worker ProjX scope: the child is launched with --task <this step> so
@@ -272,8 +310,13 @@ func runDispatchSupervise(absRoot string, args []string) {
 			sc := scopeForStep(*st)
 			stepErr = runDispatchChild(self, absRoot,
 				[]string{"agent", "run", "--task", sc.Task, "--", sc.Task},
+				st.Tier,
 				st.ProviderCmd,
-				[]string{"PROJX_WORKER_ROLE=" + sc.Role})
+				st.Provider,
+				st.ProviderProfile,
+				st.ProviderModel,
+				st.ProviderEffort,
+				[]string{"PROJX_WORKER_ROLE=" + sc.Role}, dispatchStepStarted(absRoot, m, st))
 		}
 		// Record the verdict even for a FAILED step: a step that half-wrote the tree before
 		// dying is worth knowing about, and it costs one git call either way.
@@ -282,12 +325,14 @@ func runDispatchSupervise(absRoot string, args []string) {
 
 		if stepErr != nil {
 			st.State = "failed"
+			st.Finished = time.Now()
 			failed = true
 			_ = writeDispatchManifest(absRoot, m)
 			fmt.Printf("dispatch %s: step %d FAILED: %v\n", id, i+1, stepErr)
 			break
 		}
 		st.State = "done"
+		st.Finished = time.Now()
 		_ = writeDispatchManifest(absRoot, m)
 		if silentAgentStep(*st) {
 			// Loud at the moment it happens, not just in the final tally — this line is
@@ -304,7 +349,7 @@ func runDispatchSupervise(absRoot string, args []string) {
 		// leave verify unset; the run already failed at a step
 	case agentWork:
 		fmt.Printf("\n── dispatch %s: verifying result ──\n", id)
-		if err := runDispatchChild(self, absRoot, []string{"verify"}, "", nil); err != nil {
+		if err := runDispatchChild(self, absRoot, []string{"verify"}, "", "", "", "", "", "", nil); err != nil {
 			m.Verify = "failed"
 			failed = true
 		} else {
@@ -341,21 +386,58 @@ func deterministicStepArgs(op string) []string {
 // providerCmd, when set, becomes PROJX_AGENT_CMD so the agent launcher uses the
 // tier the router chose for this step. extraEnv carries the per-worker scope (e.g.
 // PROJX_WORKER_ROLE) so each child is launched under only its step's scope.
-func runDispatchChild(self, absRoot string, argv []string, providerCmd string, extraEnv []string) error {
+func dispatchStepStarted(absRoot string, m *dispatchManifest, st *dispatchStepStat) func(int) {
+	return func(pid int) {
+		st.PID = pid
+		st.ParentPID = os.Getpid()
+		st.Started = time.Now()
+		_ = writeDispatchManifest(absRoot, m)
+	}
+}
+
+func runDispatchChild(self, absRoot string, argv []string, class string, providerCmd string, provider string, profile string, model string, effort string, extraEnv []string, started ...func(int)) error {
 	full := append([]string{"--root", absRoot}, argv...)
 	cmd := exec.Command(self, full...)
 	cmd.Dir = absRoot
 	cmd.Stdin = nil
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	cmd.SysProcAttr = quietSysProcAttr()
+	cmd.SysProcAttr = managedChildSysProcAttr()
 	env := os.Environ()
+	if len(argv) > 0 && argv[0] == "agent" {
+		env = append(env, "PROJX_POLICY_CLASS="+class)
+		env = append(env, "PROJX_POLICY_PROVIDER="+provider)
+		env = append(env, "PROJX_POLICY_PROFILE="+profile)
+		env = append(env, "PROJX_POLICY_MODEL="+model)
+		env = append(env, "PROJX_AGENT_PROFILE="+profile)
+		env = append(env, "PROJX_AGENT_EFFORT="+effort)
+		if providerCmd != "" {
+			env = append(env, "PROJX_POLICY_FALLBACK=explicit-cmd")
+		} else {
+			env = append(env, "PROJX_POLICY_FALLBACK=ambient-allowed")
+		}
+	}
 	if providerCmd != "" {
 		env = append(env, "PROJX_AGENT_CMD="+providerCmd)
+	} else {
+		env = append(env, "PROJX_AGENT_CMD=")
+		if provider != "" {
+			env = append(env, "PROJX_AGENT="+provider)
+		}
+		if model != "" {
+			env = append(env, "PROJX_AGENT_MODEL="+model)
+		}
 	}
+	env = managedChildEnv(env, os.Getpid())
 	env = append(env, extraEnv...)
 	cmd.Env = env
-	return cmd.Run()
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	if len(started) > 0 && started[0] != nil {
+		started[0](cmd.Process.Pid)
+	}
+	return cmd.Wait()
 }
 
 // Mutation values recorded on a step: did the repo actually CHANGE?
@@ -573,6 +655,40 @@ func runDispatchStatus(absRoot string, args []string) {
 	for _, m := range runs {
 		if n := silentAgentSteps(m); len(n) > 0 {
 			fmt.Printf("⚠ %s: %d agent step(s) changed nothing — `dispatch status %s`\n", m.ID, len(n), m.ID)
+		}
+	}
+}
+
+func runDispatchCancel(absRoot string, args []string) {
+	if len(args) != 1 {
+		die("usage: dispatch cancel <run-id>")
+	}
+	m, err := readDispatchManifest(absRoot, args[0])
+	if err != nil {
+		die("dispatch cancel: no run %q: %v", args[0], err)
+	}
+	if m.State != "running" {
+		fmt.Printf("dispatch %s is already %s\n", m.ID, m.State)
+		return
+	}
+	if err := terminateManagedTree(m.PID); err != nil {
+		die("dispatch cancel %s: terminate managed tree: %v", m.ID, err)
+	}
+	markDispatchCancelled(m)
+	if err := writeDispatchManifest(absRoot, m); err != nil {
+		die("dispatch cancel %s: write manifest: %v", m.ID, err)
+	}
+	fmt.Printf("dispatch %s cancelled; managed process tree terminated\n", m.ID)
+}
+
+func markDispatchCancelled(m *dispatchManifest) {
+	m.State = "cancelled"
+	m.FailureReason = "cancelled by user"
+	m.Finished = time.Now()
+	for i := range m.Steps {
+		if m.Steps[i].State == "running" || m.Steps[i].State == "pending" {
+			m.Steps[i].State = "cancelled"
+			m.Steps[i].Finished = m.Finished
 		}
 	}
 }

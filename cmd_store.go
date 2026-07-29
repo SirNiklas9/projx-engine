@@ -58,6 +58,18 @@ func hasProjectStore(absRoot string) bool {
 	return err == nil && !fi.IsDir()
 }
 
+func isWorkspaceRoot(absRoot string) bool {
+	if absRoot == "" {
+		return false
+	}
+	fi, err := os.Stat(filepath.Join(absRoot, ".projx-workspace"))
+	return err == nil && fi.IsDir()
+}
+
+func isProjectStoreRoot(absRoot string) bool {
+	return hasProjectStore(absRoot) && !isWorkspaceRoot(absRoot)
+}
+
 func openEphemeralProjectStore() (*store.SQLite, string, error) {
 	f, err := os.CreateTemp("", "projx-empty-project-*.db")
 	if err != nil {
@@ -84,7 +96,7 @@ func openStoreScoped(absRoot string, createProject bool) (*projectStore, error) 
 		tempProjectPath string
 		err             error
 	)
-	if hasProjectStore(absRoot) {
+	if hasProjectStore(absRoot) && (createProject || !isWorkspaceRoot(absRoot)) {
 		project, err = store.Open(filepath.Join(projDir, "store.db"))
 		if err != nil {
 			return nil, fmt.Errorf("open project store: %v", err)
@@ -213,8 +225,11 @@ func workspaceStorePath(absRoot string) string {
 func enclosingProjectRoot(start string) string {
 	dir := start
 	for i := 0; i < 64; i++ {
-		if fi, err := os.Stat(filepath.Join(dir, ".projx", "store.db")); err == nil && !fi.IsDir() {
+		if isProjectStoreRoot(dir) {
 			return dir
+		}
+		if isWorkspaceRoot(dir) {
+			break
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
@@ -363,6 +378,7 @@ func storeMove(absRoot string, args []string) {
 }
 
 func storeGet(absRoot string, args []string) {
+	args, jsonOut := takeJSONFlag(args)
 	if len(args) == 0 {
 		die("usage: store get <id>")
 	}
@@ -375,10 +391,15 @@ func storeGet(absRoot string, args []string) {
 		fmt.Fprintf(os.Stderr, "  if the record lives in another project, pass --root <projectdir>\n")
 		os.Exit(1)
 	}
+	if jsonOut {
+		writeCLIJSON(cliRecordFrom(r))
+		return
+	}
 	printRecord(r)
 }
 
 func storeList(absRoot string, args []string) {
+	args, jsonOut := takeJSONFlag(args)
 	fs := flag.NewFlagSet("store list", flag.ExitOnError)
 	kindFlag := fs.String("kind", "", "filter by kind name")
 	scopeFlag := fs.String("scope", "", "filter by scope: global|workspace|project")
@@ -405,7 +426,12 @@ func storeList(absRoot string, args []string) {
 
 	st := openStore(absRoot)
 	defer st.Close()
-	for _, r := range st.List(f) {
+	records := st.List(f)
+	if jsonOut {
+		writeCLIJSON(map[string]any{"count": len(records), "records": cliRecordsFrom(records)})
+		return
+	}
+	for _, r := range records {
 		fmt.Printf("%s\t[%s/%s]\t%s\t%s\n", r.ID, r.Kind.String(), r.Scope.String(), r.Key, oneLine(r.Body))
 	}
 }
@@ -415,6 +441,7 @@ func storeList(absRoot string, args []string) {
 // --kind and --scope use the same enum parsing as store list.
 // --key and --text are case-insensitive substring matches on Key and Body respectively.
 func storeQuery(absRoot string, args []string) {
+	args, jsonOut := takeJSONFlag(args)
 	fs := flag.NewFlagSet("store query", flag.ExitOnError)
 	kindFlag := fs.String("kind", "", "filter by kind name")
 	scopeFlag := fs.String("scope", "", "filter by scope: global|workspace|project")
@@ -501,6 +528,17 @@ func storeQuery(absRoot string, args []string) {
 	if len(shown) > cap {
 		shown = shown[:cap]
 	}
+	if jsonOut {
+		records := make([]store.Record, 0, len(shown))
+		for _, hit := range shown {
+			records = append(records, hit.r)
+		}
+		writeCLIJSON(map[string]any{
+			"query": term, "count": len(hits), "shown": len(records),
+			"truncated": len(hits) > cap, "records": cliRecordsFrom(records),
+		})
+		return
+	}
 	for _, h := range shown {
 		fmt.Printf("%s\t[%s/%s]\t%s\t%s\n", h.r.ID, h.r.Kind.String(), h.r.Scope.String(), h.r.Key, oneLine(h.r.Body))
 	}
@@ -532,11 +570,11 @@ func storeCommit(absRoot string, args []string) {
 	statusFlag := fs.String("status", "", "lifecycle: candidate|active|superseded|rejected")
 	supersedesFlag := fs.String("supersedes", "", "record id this claim supersedes")
 	replacedByFlag := fs.String("replaced-by", "", "record id that replaces this claim")
-	claimClassFlag := fs.String("claim-class", "", "stable|volatile or a domain-specific class")
+	claimClassFlag := fs.String("claim-class", "", "agent commits require: stable|volatile|decision|convention|ownership-boundary|completion-criteria")
 	verifiedAtFlag := fs.String("verified-at", "", "verification time (YYYY-MM-DD or RFC3339)")
 	reviewAfterFlag := fs.String("review-after", "", "review deadline (YYYY-MM-DD or RFC3339)")
 	verifierFlag := fs.String("verifier", "", "verification mechanism or identity")
-	evidenceFlag := fs.String("evidence", "", "evidence reference or digest")
+	evidenceFlag := fs.String("evidence", "", "agent commits require a live source, test, or durable reference")
 	modelFlag := fs.String("model", "", "model that produced the claim")
 	confidenceFlag := fs.Int("confidence", 0, "optional confidence 0..100")
 	approvalFlag := fs.String("approval", "", "approval state or identity")
@@ -637,6 +675,11 @@ func storeCommit(absRoot string, args []string) {
 	}
 	if visited["approval"] {
 		rec.Approval = strings.TrimSpace(*approvalFlag)
+	}
+	if effectiveBy == "agent" {
+		if err := validateAgentKnowledgeCandidate(rec); err != nil {
+			die("commit refused: %v", err)
+		}
 	}
 	if err := st.Put(rec); err != nil {
 		die("put: %v", err)
@@ -840,6 +883,27 @@ func printRecord(r store.Record) {
 	}
 	if r.Enforcement != "" {
 		fmt.Printf("enforcement: %s\n", r.Enforcement)
+	}
+	if r.Status != "" {
+		fmt.Printf("status: %s\n", r.LifecycleStatus())
+	}
+	if r.ClaimClass != "" {
+		fmt.Printf("claim class: %s\n", r.ClaimClass)
+	}
+	if r.Verifier != "" {
+		fmt.Printf("verifier: %s\n", r.Verifier)
+	}
+	if r.Evidence != "" {
+		fmt.Printf("evidence: %s\n", r.Evidence)
+	}
+	if r.Model != "" {
+		fmt.Printf("model: %s\n", r.Model)
+	}
+	if r.Confidence != 0 {
+		fmt.Printf("confidence: %d\n", r.Confidence)
+	}
+	if r.Approval != "" {
+		fmt.Printf("approval: %s\n", r.Approval)
 	}
 	fmt.Printf("body:  %s\n", r.Body)
 }

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -418,7 +417,7 @@ func (s *controlServer) handleStorePut(w http.ResponseWriter, r *http.Request) {
 		bp = &before
 	}
 	recordStoreOp(root, "put", "ui", bp, &rec)
-	syncProjectClaudeMD(root, st)
+	syncProjectAgentInstructions(root)
 	writeJSONResp(w, map[string]bool{"ok": true})
 }
 
@@ -439,7 +438,7 @@ func (s *controlServer) handleStoreDelete(w http.ResponseWriter, r *http.Request
 	if had {
 		recordStoreOp(root, "delete", "ui", &before, nil)
 	}
-	syncProjectClaudeMD(root, st)
+	syncProjectAgentInstructions(root)
 	writeJSONResp(w, map[string]bool{"ok": true})
 }
 
@@ -464,20 +463,12 @@ func (s *controlServer) handleStoreUndo(w http.ResponseWriter, r *http.Request) 
 		writeJSONResp(w, map[string]any{"ok": false, "msg": "nothing to undo"})
 		return
 	}
-	syncProjectClaudeMD(root, st)
+	syncProjectAgentInstructions(root)
 	writeJSONResp(w, map[string]any{"ok": true, "undid": rev.Seq, "id": rev.ID})
 }
 
-// syncProjectClaudeMD regenerates the managed block in <root>/CLAUDE.md from the
-// store, preserving user content. The engine owns CLAUDE.md; the renderer is the
-// shared one in projx-store, so engine and cell produce identical output.
-func syncProjectClaudeMD(root string, st store.Store) {
-	path := filepath.Join(root, "CLAUDE.md")
-	existing, _ := os.ReadFile(path)
-	out := store.SpliceManagedBlock(string(existing), store.ManagedBlock(st))
-	_ = os.WriteFile(path, []byte(out), 0o644)
-}
-
+// Agent instructions are synchronized by syncProjectAgentInstructions, which
+// owns only the marker-delimited ProjX blocks in shared files.
 func (s *controlServer) handleProfile(w http.ResponseWriter, r *http.Request) {
 	writeJSONResp(w, loadCageConfig(s.reqRoot(r)))
 }

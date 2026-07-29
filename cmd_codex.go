@@ -56,7 +56,7 @@ func mergeCodexHooks(path string) (added, skipped []string, err error) {
 		if !hasCurrent {
 			handler := map[string]any{
 				"type": "command", "command": want, "commandWindows": wantWindows,
-				"timeout": s.timeout, "statusMessage": "Loading ProjX",
+				"timeout": s.timeout, "statusMessage": "ProjX is loading project knowledge",
 			}
 			group := map[string]any{"hooks": []any{handler}}
 			if s.matcher != "" {
@@ -120,6 +120,9 @@ func installCodexSkill(codexDir string) (path string, wrote bool, err error) {
 	return dst, true, nil
 }
 
+// installCodexProjectConfig installs ProjX in Codex's native project config.
+// Codex-only init removes the portable .mcp.json ProjX entry, so this remains
+// the one and only ProjX MCP registration Codex will launch.
 func installCodexProjectConfig(absRoot string) (string, error) {
 	path := filepath.Join(absRoot, ".codex", "config.toml")
 	cfg := map[string]any{}
@@ -150,6 +153,38 @@ func installCodexProjectConfig(absRoot string) (string, error) {
 		return "", err
 	}
 	return path, nil
+}
+
+// removeCodexProjectMCPRegistration removes only ProjX from a Codex project
+// config. It preserves model settings and every unrelated MCP server.
+func removeCodexProjectMCPRegistration(absRoot string) (bool, error) {
+	path := filepath.Join(absRoot, ".codex", "config.toml")
+	cfg := map[string]any{}
+	if data, err := os.ReadFile(path); err == nil && len(bytes.TrimSpace(data)) > 0 {
+		if _, err := toml.Decode(string(data), &cfg); err != nil {
+			return false, fmt.Errorf("%s exists but isn't valid TOML: %w", path, err)
+		}
+	} else if os.IsNotExist(err) {
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+	servers, _ := cfg["mcp_servers"].(map[string]any)
+	if servers == nil || servers["projx"] == nil {
+		return false, nil
+	}
+	delete(servers, "projx")
+	if len(servers) == 0 {
+		delete(cfg, "mcp_servers")
+	}
+	var out bytes.Buffer
+	if err := toml.NewEncoder(&out).Encode(cfg); err != nil {
+		return false, err
+	}
+	if err := os.WriteFile(path, out.Bytes(), 0o644); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func bootstrapCodex(home string) error {

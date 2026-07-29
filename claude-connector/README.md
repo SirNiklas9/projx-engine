@@ -14,7 +14,7 @@ Windows, macOS, and Linux. A different harness (Neovim, JetBrains) gets its own 
 
 | Event | What `projx-engine hook` does |
 |---|---|
-| `SessionStart` | refreshes the code map (silent), then injects the **lean floor** (protocol + law) and starts a fresh session checkpoint |
+| `SessionStart` | injects the **lean floor** immediately, starts a fresh session checkpoint, then refreshes the code map in the background |
 | `UserPromptSubmit` | re-asserts the law + injects only the **new/changed** store records relevant to the prompt (task-sliced **delta**) |
 | `PreToolUse` (Bash\|Read\|Edit\|Write\|MultiEdit\|NotebookEdit) | blocks a tool call whose target path or shell command is off-limits (exit 2 + reason) |
 | `PreCompact` | marks the floor lost so the next turn re-sends protocol+law+slice after compaction |

@@ -10,6 +10,7 @@ import (
 )
 
 func runGateCmd(absRoot string, args []string) {
+	args, jsonOut := takeJSONFlag(args)
 	if len(args) == 0 {
 		fmt.Fprintln(os.Stderr, "usage: gate <add|list|rm|check>")
 		os.Exit(1)
@@ -17,20 +18,20 @@ func runGateCmd(absRoot string, args []string) {
 	sub, rest := args[0], args[1:]
 	switch sub {
 	case "add":
-		gateAdd(absRoot, rest)
+		gateAdd(absRoot, rest, jsonOut)
 	case "list":
-		gateList(absRoot, rest)
+		gateList(absRoot, rest, jsonOut)
 	case "rm":
-		gateRm(absRoot, rest)
+		gateRm(absRoot, rest, jsonOut)
 	case "check":
-		gateCheck(absRoot, rest)
+		gateCheck(absRoot, rest, jsonOut)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown gate subcommand %q (add|list|rm|check)\n", sub)
 		os.Exit(1)
 	}
 }
 
-func gateAdd(absRoot string, args []string) {
+func gateAdd(absRoot string, args []string, jsonOut bool) {
 	if len(args) == 0 {
 		die("usage: gate add <pattern>")
 	}
@@ -54,13 +55,21 @@ func gateAdd(absRoot string, args []string) {
 		die("put: %v", err)
 	}
 	recordStoreOp(absRoot, "put", "ui", bp, &rec)
+	if jsonOut {
+		writeCLIJSON(map[string]any{"ok": true, "id": id, "pattern": pattern})
+		return
+	}
 	fmt.Println("added gate rule", id)
 }
 
-func gateList(absRoot string, _ []string) {
+func gateList(absRoot string, _ []string, jsonOut bool) {
 	st := openStore(absRoot)
 	defer st.Close()
 	rules := st.List(store.OfKind(store.KGateRule))
+	if jsonOut {
+		writeCLIJSON(map[string]any{"count": len(rules), "rules": cliRecordsFrom(rules)})
+		return
+	}
 	if len(rules) == 0 {
 		fmt.Println("(no gate rules)")
 		return
@@ -75,7 +84,7 @@ func gateList(absRoot string, _ []string) {
 // "is this path off-limits?" query a per-harness connector's PreToolUse hook
 // calls (exit 2 = the Claude Code hook "block" convention). An absolute path
 // under --root is normalized to a project-relative path before matching.
-func gateCheck(absRoot string, args []string) {
+func gateCheck(absRoot string, args []string, jsonOut bool) {
 	if len(args) == 0 {
 		die("usage: gate check <path>")
 	}
@@ -90,13 +99,20 @@ func gateCheck(absRoot string, args []string) {
 	defer st.Close()
 
 	if pat, denied := gateDeniedPath(st, target); denied {
+		if jsonOut {
+			writeCLIJSON(map[string]any{"allowed": false, "path": target, "rule": pat})
+			os.Exit(2)
+		}
 		fmt.Fprintf(os.Stderr, "gate: DENIED %q by rule %q\n", target, pat)
 		os.Exit(2)
+	}
+	if jsonOut {
+		writeCLIJSON(map[string]any{"allowed": true, "path": target})
 	}
 	os.Exit(0)
 }
 
-func gateRm(absRoot string, args []string) {
+func gateRm(absRoot string, args []string, jsonOut bool) {
 	if len(args) == 0 {
 		die("usage: gate rm <id-or-pattern>")
 	}
@@ -122,5 +138,9 @@ func gateRm(absRoot string, args []string) {
 		die("delete: %v", err)
 	}
 	recordStoreOp(absRoot, "delete", "ui", &before, nil)
+	if jsonOut {
+		writeCLIJSON(map[string]any{"ok": true, "id": idOrPattern, "removed": true})
+		return
+	}
 	fmt.Println("removed gate rule", idOrPattern)
 }

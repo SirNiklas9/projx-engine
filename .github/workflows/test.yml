@@ -1,0 +1,43 @@
+name: test
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lifecycle:
+    name: lifecycle (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check out local-replace dependencies
+        shell: bash
+        env:
+          GH_CLONE_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE/.."
+          clone_repo() {
+            [ -d "$1/.git" ] || git clone --depth 1 "https://x-access-token:${GH_CLONE_TOKEN}@github.com/$2/$1.git" "$1"
+          }
+          for repo in projx-core projx-store projx-verify; do clone_repo "$repo" SirNiklas9; done
+          for repo in Pulp Pulp-cage Pulp-ext-confine Pulp-ext-egress Pulp-ext-hook Pulp-ext-fuse Pulp-grants; do clone_repo "$repo" BananaLabs-OSS; done
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Run lifecycle and provider acceptance tests
+        shell: bash
+        run: >-
+          go test . -count=1 -run
+          'Test(HandleHookLifecycle|MergeGlobalHookIdempotent|AgentRunInvokesCodexAdapterWithSelectedProfile|DispatchJobKillsManagedDescendantsOnExit|TerminateManagedTreeKillsSupervisorAndChild|ManagedChildEnvReplacesParentLease)'
+      - name: Run deterministic routing/catalog tests
+        shell: bash
+        run: go test ./internal/routing -count=1
