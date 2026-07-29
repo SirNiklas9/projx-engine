@@ -53,16 +53,16 @@ replace github.com/SirNiklas9/projx-store => ../projx-store
 
 replace github.com/SirNiklas9/projx-verify => ../projx-verify
 
-replace github.com/BananaLabs-OSS/Pulp-ext-confine => ../Pulp-ext-confine
+replace github.com/BananaLabs-OSS/Pulp-ext-confine => ./third_party/Pulp-ext-confine
 
-replace github.com/BananaLabs-OSS/Pulp-ext-egress => ../Pulp-ext-egress
+replace github.com/BananaLabs-OSS/Pulp-ext-egress => ./third_party/Pulp-ext-egress
 
-replace github.com/BananaLabs-OSS/Pulp-ext-hook => ../Pulp-ext-hook
+replace github.com/BananaLabs-OSS/Pulp-ext-hook => ./third_party/Pulp-ext-hook
 
-replace github.com/BananaLabs-OSS/Pulp-ext-fuse => ../Pulp-ext-fuse
+replace github.com/BananaLabs-OSS/Pulp-ext-fuse => ./third_party/Pulp-ext-fuse
 
-replace github.com/BananaLabs-OSS/Pulp-grants => ../Pulp-grants
+replace github.com/BananaLabs-OSS/Pulp-grants => ./third_party/Pulp-grants
 
 replace github.com/BananaLabs-OSS/Pulp => ../Pulp
 
-replace github.com/BananaLabs-OSS/Pulp-cage => ../Pulp-cage
+replace github.com/BananaLabs-OSS/Pulp-cage => ./third_party/Pulp-cage

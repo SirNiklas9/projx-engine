@@ -31,9 +31,7 @@ jobs:
           for repo in projx-core projx-store projx-verify; do
             clone_with_token "SirNiklas9" "$repo"
           done
-          for repo in Pulp Pulp-cage Pulp-ext-confine Pulp-ext-egress Pulp-ext-hook Pulp-ext-fuse Pulp-grants; do
-            clone_with_token "BananaLabs-OSS" "$repo"
-          done
+          clone_with_token "BananaLabs-OSS" "Pulp"
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
