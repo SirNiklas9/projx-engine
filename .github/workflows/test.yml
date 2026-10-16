@@ -10,13 +10,11 @@ permissions:
   contents: read
 
 jobs:
-  lifecycle:
-    name: lifecycle (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-latest, ubuntu-latest]
+  linux:
+    name: lifecycle (Linux)
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, linux, x64, sirniklas-local]
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.0.2
       - name: Check out local-replace dependencies
@@ -41,6 +39,33 @@ jobs:
         shell: bash
         run: go test ./internal/routing -count=1
       - name: Run full suite on Linux
-        if: matrix.os == 'ubuntu-latest'
         shell: bash
         run: go test ./... -count=1
+
+  windows:
+    name: lifecycle (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.0.2
+      - name: Check out local-replace dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE/.."
+          clone_repo() {
+            [ -d "$1/.git" ] || git clone --depth 1 "https://github.com/$2/$1.git" "$1"
+          }
+          clone_repo Pulp BananaLabs-OSS
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Run lifecycle and provider acceptance tests
+        shell: bash
+        run: >-
+          go test . -count=1 -run
+          'Test(HandleHookLifecycle|MergeGlobalHookIdempotent|AgentRunInvokesCodexAdapterWithSelectedProfile|DispatchJobKillsManagedDescendantsOnExit|TerminateManagedTreeKillsSupervisorAndChild|ManagedChildEnvReplacesParentLease)'
+      - name: Run deterministic routing/catalog tests
+        shell: bash
+        run: go test ./internal/routing -count=1
