@@ -10,27 +10,22 @@ permissions:
 
 jobs:
   binaries:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, sirniklas-local]
+    timeout-minutes: 30
     steps:
       - name: Check out ProjX engine
-        uses: actions/checkout@v4
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.0.2
         with:
           path: projx-engine
+          persist-credentials: false
       - name: Check out ProjX dependencies
         shell: bash
-        env:
-          GH_CLONE_TOKEN: ${{ secrets.PROJX_RELEASE_TOKEN != '' && secrets.PROJX_RELEASE_TOKEN || github.token }}
         run: |
           set -euo pipefail
           cd "$GITHUB_WORKSPACE"
-          clone_with_token() {
-            local owner="$1"
-            local repo="$2"
-            git clone --depth 1 "https://x-access-token:${GH_CLONE_TOKEN}@github.com/${owner}/${repo}.git" "$repo"
-          }
-          clone_with_token "BananaLabs-OSS" "Pulp"
+          git clone --depth 1 https://github.com/BananaLabs-OSS/Pulp.git Pulp
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: projx-engine/go.mod
           cache-dependency-path: projx-engine/go.sum
@@ -54,7 +49,7 @@ jobs:
           GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "-s -w -H=windowsgui" -o dist/projx-engine-headless_windows_amd64.exe ./cmd/projx-headless
           (cd dist && sha256sum projx-engine_* > projx-engine_checksums.txt)
       - name: Publish GitHub release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           files: projx-engine/dist/*
           generate_release_notes: true
